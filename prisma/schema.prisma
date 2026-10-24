@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// PostgreSQL — identik untuk pengembangan lokal maupun Neon produksi.
+// - DATABASE_URL : koneksi runtime. Di Neon gunakan endpoint *pooled*
+//   (nama host mengandung "-pooler") agar aman untuk lingkungan serverless.
+// - DIRECT_URL   : koneksi untuk migrasi (`prisma migrate`). Di Neon gunakan
+//   endpoint *direct* (tanpa "-pooler"). Di lokal isi sama dengan DATABASE_URL.
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// e-SIMANTRI — Fase 0 (Fondasi) + Fase 1 (Registrasi & Kunjungan)
+//                 + Fase 2 (Catatan Klinis Dokter Umum)
+// Modul aktif  : identity_access + audit + registration_encounter
+//                + clinical_note_dokter
+// Catatan      : Peran dan status disimpan sebagai String dan
+//                divalidasi di lapisan aplikasi (src/lib/roles.ts)
+//                agar penyempitan peran per praktik tetap lentur
+//                pada fase-fase berikutnya.
+//                Catatan klinis Fase 2 memakai teks terstruktur per
+//                bagian PMK 24/2022; terminologi ICD-10/ICD-9-CM/KFA
+//                dan resep terstruktur menyusul pada Fase 3.
+// ============================================================
+
+// Tenant = satu tempat praktik mandiri (satu legal entity / satu SIP penyelenggara)
+model Organization {
+  id             String   @id @default(cuid())
+  name           String
+  practiceType   String   @default("PRAKTIK_DOKTER") // jenis praktik mandiri
+  sipNumber      String? // SIP penyelenggara praktik (bukan SIP pribadi nakes)
+  ownerName      String? // nama penanggung jawab sesuai dokumen
+  address        String?
+  city           String?
+  province       String?
+  postalCode     String?
+  phone          String?
+  email          String?
+  letterheadText String? // kop surat untuk dokumen/salinan (dipakai mulai Fase 4)
+  status         String   @default("AKTIF") // AKTIF | NONAKTIF — praktik tutup tetap menjaga retensi isi RM
+  mrnCounter     Int      @default(0) // penghitung nomor rekam medis per praktik (atomik via increment)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  memberships Membership[]
+  auditLogs   AuditLog[]
+  patients    Patient[]
+  encounters  Encounter[]
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  fullName           String
+  email              String   @unique
+  passwordHash       String // bcrypt — jangan pernah menyimpan plaintext
+  phone              String?
+  profession         String? // Dokter, Dokter Gigi, Bidan, Perawat, dst.
+  strNumber          String? // STR — wajib bagi yang menandatangani catatan klinis (divalidasi di Fase 2)
+  sipNumber          String? // SIP/SIPP pribadi bila ada
+  isActive           Boolean  @default(true)
+  totpSecret         String? // secret TOTP — hanya berada di server
+  totpEnabled        Boolean  @default(false)
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  memberships Membership[]
+  sessions    Session[]
+  auditLogs   AuditLog[]
+  authoredNotes ClinicalNote[]
+}
+
+// Keanggotaan: pengguna × praktik × peran.
+// Satu pengguna boleh punya lebih dari satu peran di praktik yang sama
+// (mis. Penanggung Jawab sekaligus PPA) dan peran berbeda antarpraktik.
+model Membership {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String // salah satu dari ROLE_KEYS di src/lib/roles.ts
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  sessions     Session[]
+
+  @@unique([userId, organizationId, role])
+  @@index([organizationId])
+}
+
+model Session {
+  id                 String    @id @default(cuid())
+  tokenHash          String    @unique // sha256 dari token cookie; token mentah tidak pernah disimpan
+  userId             String
+  activeMembershipId String? // praktik+peran yang sedang aktif; sumber kebenaran tenant di sisi server
+  pending2FA         Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  lastSeenAt         DateTime  @default(now())
+  expiresAt          DateTime // batas absolut sesi
+  revokedAt          DateTime?
+  ip                 String?
+  userAgent          String?
+
+  user             User        @relation(fields: [userId], references: [id])
+  activeMembership Membership? @relation(fields: [activeMembershipId], references: [id])
+
+  @@index([userId])
+}
+
+// Jejak audit — append-only. Tidak tersedia fungsi ubah/hapus di lapisan aplikasi.
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String? // null = peristiwa global (mis. login sebelum memilih praktik)
+  actorUserId    String?
+  actorName      String? // snapshot nama pelaku saat aksi
+  actorRole      String? // snapshot peran aktif saat aksi
+  action         String // mis. MASUK_BERHASIL, PENGGUNA_DITAMBAHKAN
+  objectType     String? // mis. Session, User, Membership, Organization
+  objectId       String?
+  summary        String // ringkasan manusiawi dalam Bahasa Indonesia
+  reason         String? // alasan bila akses tidak rutin (break-glass — Fase lanjutan)
+  ip             String?
+  userAgent      String?
+  sessionId      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  actor        User?         @relation(fields: [actorUserId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([action])
+}
+
+// ============================================================
+// FASE 1 — Registrasi & Kunjungan (registration_encounter)
+// ============================================================
+
+// Pasien milik SATU praktik (tenant-scoped). Pasien tidak dihapus:
+// duplikat/ganda dinonaktifkan melalui isActive dan tetap tersimpan
+// demi keutuhan rekam medis.
+model Patient {
+  id              String    @id @default(cuid())
+  organizationId  String
+  mrn             String // nomor rekam medis, unik per praktik (RM-0001 dst.)
+  fullName        String
+  nationalId      String? // NIK (16 digit) — data pribadi sensitif; ditampilkan tersamarkan
+  dateOfBirth     DateTime?
+  sex             String? // LAKI_LAKI | PEREMPUAN
+  phone           String?
+  address         String?
+  payerType       String    @default("UMUM") // UMUM | BPJS | ASURANSI | LAINNYA (label administratif, tanpa integrasi)
+  payerNumber     String? // nomor kartu BPJS/asuransi bila ada
+  notes           String? // catatan administratif pendaftaran (bukan isi klinis)
+  isActive        Boolean   @default(true)
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id])
+  encounters   Encounter[]
+  clinicalNotes ClinicalNote[]
+
+  @@unique([organizationId, mrn])
+  @@index([organizationId, fullName])
+}
+
+// Kunjungan rawat jalan (class AMB pada kosa kata SATUSEHAT — Fase 5).
+// PMK 24/2022: tanggal & jam buka-tutup kunjungan tercatat di sini.
+model Encounter {
+  id                 String    @id @default(cuid())
+  organizationId     String
+  patientId          String
+  status             String    @default("DALAM_PROSES") // DALAM_PROSES | SELESAI
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  registeredByUserId String
+  payerType          String? // snapshot pembayar saat kunjungan
+  payerNumber        String?
+  visitType          String    @default("KUNJUNGAN_LANGSUNG") // plugin: telekonsultasi Fase 7
+  closeReason        String? // alasan penutupan tanpa catatan terkunci (mis. pasien pulang sebelum diperiksa)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  patient      Patient      @relation(fields: [patientId], references: [id])
+  note         ClinicalNote?
+
+  @@index([organizationId, openedAt])
+  @@index([patientId])
+}
+
+// ============================================================
+// FASE 2 — Catatan klinis dokter umum (clinical_note_dokter)
+// Satu catatan per kunjungan. Bagian mengikuti isi minimum
+// PMK 24/2022 (teks terstruktur; kode ICD-10/KFA menyusul Fase 3,
+// resource FHIR menyusul Fase 5 — titik sambung dijaga).
+// TIDAK ADA fungsi hapus: draf dapat diubah sampai dikunci;
+// catatan terkunci hanya dapat dikoreksi lewat amandemen
+// (versi lama dipertahankan di ClinicalNoteVersion).
+// ============================================================
+model ClinicalNote {
+  id               String    @id @default(cuid())
+  organizationId   String
+  encounterId      String    @unique
+  patientId        String
+  authorUserId     String // PPA penanggung jawab pelayanan
+  authorProfession String? // snapshot profesi penulis saat mengunci
+  authorStrNumber  String? // snapshot STR penulis saat mengunci
+  status           String    @default("DRAF") // DRAF | TERKUNCI
+
+  // — Isi minimum PMK 24/2022 —
+  subjective     String? // keluhan utama dan riwayat penyakit
+  allergiesNote  String? // alergi dan riwayat pemakaian obat yang relevan
+  objective      String? // hasil pemeriksaan fisik/tambahan
+  supportingExam String? // hasil pemeriksaan penunjang (jika ada)
+  assessment     String? // diagnosis (teks bebas; ICD-10 pada Fase 3)
+  plan           String? // rencana penatalaksanaan
+  medsGiven      String? // obat/tindakan yang diberikan (teks bebas; KFA pada Fase 3)
+  otherServices  String? // pelayanan lainnya
+  education      String? // edukasi yang diberikan kepada pasien/keluarga
+  followUpPlan   String? // rencana tindak lanjut/kontrol
+
+  versionNumber Int       @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lockedAt      DateTime?
+  lockedByUserId String?
+
+  encounter Encounter            @relation(fields: [encounterId], references: [id])
+  patient   Patient              @relation(fields: [patientId], references: [id])
+  author    User                 @relation(fields: [authorUserId], references: [id])
+  versions  ClinicalNoteVersion[]
+
+  @@index([organizationId, status])
+  @@index([authorUserId])
+}
+
+// Riwayat revisi — append-only. Setiap amandemen catatan terkunci
+// menyimpan snapshot isi (versi sebelumnya) beserta ALASAN WAJIB
+// dan pelaku. Tidak tersedia fungsi ubah/hapus di lapisan aplikasi.
+model ClinicalNoteVersion {
+  id              String   @id @default(cuid())
+  noteId          String
+  versionNumber   Int // nomor versi yang DISIMPAN (versi sebelum amandemen)
+  subjective      String?
+  allergiesNote   String?
+  objective       String?
+  supportingExam  String?
+  assessment      String?
+  plan            String?
+  medsGiven       String?
+  otherServices   String?
+  education       String?
+  followUpPlan    String?
+  status          String // status catatan saat versi ini tercatat
+  reason          String // alasan revisi — wajib diisi
+  changedByUserId String
+  changedByName   String // snapshot nama pelaku
+  createdAt       DateTime @default(now())
+
+  note ClinicalNote @relation(fields: [noteId], references: [id])
+
+  @@unique([noteId, versionNumber])
+  @@index([noteId])
+}
