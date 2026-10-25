@@ -26,7 +26,7 @@ const PHASES: { n: number; title: string; desc: string; aktif: boolean }[] = [
   { n: 0, title: 'Fondasi', desc: 'Kerangka aplikasi, tenant, masuk akun, peran, audit, profil praktik, data contoh', aktif: true },
   { n: 1, title: 'Registrasi & kunjungan', desc: 'Pasien, antrean hari ini, buka kunjungan, status kunjungan', aktif: true },
   { n: 2, title: 'Catatan klinis dokter umum', desc: 'Formulir wajib PMK, versi, kunci catatan, larangan hapus, dasbor kelengkapan', aktif: true },
-  { n: 3, title: 'Diagnosis, tindakan, resep', desc: 'ICD-10, ICD-9-CM, KFA; resep dan tindakan menempel pada kunjungan terkunci', aktif: false },
+  { n: 3, title: 'Terminologi & resep terstruktur', desc: 'Kodifikasi ICD-10/ICD-9-CM pada catatan, katalog KFA, resep terstruktur tanpa hapus', aktif: true },
   { n: 4, title: 'Resume & salinan pasien', desc: 'Ringkasan terstruktur, unduh salinan, jejak pencetakan', aktif: false },
   { n: 5, title: 'Adapter SATUSEHAT', desc: 'Mapper FHIR, outbox, antrean sandbox, kredensial per praktik', aktif: false },
   { n: 6, title: 'Portal pasien & consent', desc: 'Akun pasien terbatas, persetujuan, riwayat akses', aktif: false },
@@ -83,8 +83,8 @@ export function BerandaView({
         <StatusCard
           icon={<FileText className="h-4 w-4" />}
           title="Terminologi & Resep"
-          desc="ICD-10, ICD-9-CM, dan KFA (resep terstruktur) menyusul pada Fase 3."
-          ok={false}
+          desc="Kodifikasi ICD-10/ICD-9-CM pada catatan, katalog KFA, resep terstruktur; koreksi kode lewat amandemen beralasan (Fase 3)."
+          ok
         />
       </section>
 
@@ -96,8 +96,8 @@ export function BerandaView({
             Peta pengembangan
           </CardTitle>
           <CardDescription>
-            Satu fase setiap giliran. Fase 0–2 sudah bisa dicoba; Fase 3 hanya dibangun setelah
-            Fase 2 teruji di lapangan.
+            Satu fase setiap giliran. Fase 0–3 sudah bisa dicoba; Fase 4 hanya dibangun setelah
+            Fase 3 teruji di lapangan.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -144,7 +144,7 @@ export function BerandaView({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <FileText className="h-4 w-4 text-primary" />
-              Catatan rilis — Fase 1 & 2
+              Catatan rilis — Fase 1–3
             </CardTitle>
             <CardDescription>Yang sudah bisa dipakai, di atas fondasi Fase 0.</CardDescription>
           </CardHeader>
@@ -156,6 +156,9 @@ export function BerandaView({
               <li>Catatan klinis dokter umum per kunjungan dengan bagian wajib PMK 24/2022.</li>
               <li>Penguncian menolak bila bagian wajib belum lengkap; kunjungan ikut ditutup saat catatan dikunci.</li>
               <li>Koreksi catatan terkunci hanya lewat amandemen beralasan — versi lama dipertahankan dan dapat dilihat.</li>
+              <li>Fase 3: kodifikasi diagnosis ICD-10 dan tindakan ICD-9-CM dari katalog referensi; kode beku saat catatan dikunci.</li>
+              <li>Fase 3: resep terstruktur bernomor per praktik dengan obat KFA dan aturan pakai; resep salah dibatalkan beralasan, tidak dihapus.</li>
+              <li>Fase 3: koreksi kode pada catatan terkunci lewat amandemen — baris lama ditandai, versi beserta snapshot kode tersimpan.</li>
               <li>Dasbor kelengkapan untuk Rekam Medis & Penanggung Jawab (metadata, tanpa isi klinis).</li>
               <li>Akses isi catatan oleh pihak bukan penulis selalu tercatat pada jejak audit.</li>
             </ul>
@@ -171,7 +174,6 @@ export function BerandaView({
           </CardHeader>
           <CardContent className="space-y-3">
             <ul className="list-disc space-y-1.5 pl-5 text-sm">
-              <li>Kode diagnosis ICD-10, kode tindakan ICD-9-CM, dan obat KFA; resep terstruktur (Fase 3).</li>
               <li>Resume kunjungan terstruktur, salinan untuk pasien, jejak pencetakan (Fase 4).</li>
               <li>Adapter SATUSEHAT — kredensial belum dikonfigurasi sama sekali (Fase 5, sandbox saja).</li>
               <li>Portal pasien, consent, riwayat akses pasien (Fase 6).</li>
@@ -181,10 +183,11 @@ export function BerandaView({
             </ul>
             <Separator />
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Catatan kepatuhan: diagnosis Fase 2 masih teks bebas — pengkodean ICD-10 dan tindakan
-              menyusul Fase 3 sebelum integrasi apa pun dibangun. Tidak ada klaim sertifikasi
-              Kemenkes atau kesiapan produksi. Koreksi terkunci lewat amandemen beralasan sudah
-              berjalan; retensi 25 tahun perlu kebijakan arsip di sisi infrastruktur Anda.
+              Catatan kepatuhan: katalog ICD-10/ICD-9-CM/KFA pada lingkungan contoh adalah SUBSET
+              CONTOH — produksi wajib mengimpor katalog resmi Kemenkes sebelum pengkodean nyata.
+              Tidak ada klaim sertifikasi Kemenkes atau kesiapan produksi. Koreksi terkunci lewat
+              amandemen beralasan (teks dan kode) sudah berjalan; retensi 25 tahun perlu kebijakan
+              arsip di sisi infrastruktur Anda.
             </p>
           </CardContent>
         </Card>

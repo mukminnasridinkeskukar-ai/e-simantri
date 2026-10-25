@@ -1,10 +1,17 @@
 // ============================================================
-// e-SIMANTRI — Seed Fase 0-2: data contoh fiktif (CONTOH)
+// e-SIMANTRI — Seed Fase 0-3: data contoh fiktif (CONTOH)
 //
 // ATURAN: Jangan pernah menyimpan/memakai data pasien sungguhan di
 // lingkungan demo. Seluruh nama, NIK, SIP, STR, alamat, dan kontak
 // di berkas ini FIKTIF dan diberi penanda CONTOH. Data pasien
-// contoh hanya untuk mencoba alur registrasi → kunjungan → catatan.
+// contoh hanya untuk mencoba alur registrasi → kunjungan → catatan
+// → kodifikasi → resep.
+//
+// KATALOG TERMINOLOGI: kode ICD-10/ICD-9-CM di bawah memakai kode
+// nyata yang umum (judul diringkas), sedangkan kode KFA memakai
+// format SINTETIS (KFA-xxxx) karena katalog resmi tidak boleh
+// dipalsukan. Keduanya ditandai isSeedDemo=true dan HANYA SUBSET
+// untuk demo — produksi wajib mengimpor katalog resmi Kemenkes.
 // ============================================================
 
 import { PrismaClient } from '@prisma/client'
@@ -17,7 +24,11 @@ const PASSWORD = 'Contoh123!'
 async function main() {
   const passwordHash = await bcrypt.hash(PASSWORD, 10)
 
-  // Bersihkan data fase 0-2 (hanya data contoh, aman di ulang)
+  // Bersihkan data fase 0-3 (hanya data contoh, aman di ulang)
+  await db.prescriptionItem.deleteMany()
+  await db.prescription.deleteMany()
+  await db.noteDiagnosis.deleteMany()
+  await db.noteProcedure.deleteMany()
   await db.clinicalNoteVersion.deleteMany()
   await db.clinicalNote.deleteMany()
   await db.encounter.deleteMany()
@@ -27,6 +38,109 @@ async function main() {
   await db.membership.deleteMany()
   await db.user.deleteMany()
   await db.organization.deleteMany()
+  // Katalog referensi global — diunggah ulang tiap seed CONTOH.
+  // Produksi TIDAK memakai seed ini (lihat seed-admin.ts + DEPLOYMENT.md).
+  await db.icd10Code.deleteMany()
+  await db.icd9CmCode.deleteMany()
+  await db.kfaCode.deleteMany()
+
+  // ============================================================
+  // FASE 3 — Katalog referensi SUBSET CONTOH
+  // ============================================================
+
+  const icd10Seed: { code: string; description: string; chapter: string }[] = [
+    { code: 'A09.0', description: 'Gastroenteritis dan kolitis infeksius lain dan yang tidak ditentukan', chapter: 'I' },
+    { code: 'A90', description: 'Demam dengue', chapter: 'I' },
+    { code: 'A91', description: 'Demam berdarah dengue', chapter: 'I' },
+    { code: 'B34.9', description: 'Infeksi virus tanpa spesifikasi lokasi', chapter: 'I' },
+    { code: 'D50.9', description: 'Anemia defisiensi besi tanpa spesifikasi', chapter: 'III' },
+    { code: 'D64.9', description: 'Anemia tanpa spesifikasi', chapter: 'III' },
+    { code: 'E11.9', description: 'Diabetes melitus tipe 2 tanpa komplikasi', chapter: 'IV' },
+    { code: 'E55.9', description: 'Defisiensi vitamin D tanpa spesifikasi', chapter: 'IV' },
+    { code: 'E66.9', description: 'Obesitas tanpa spesifikasi', chapter: 'IV' },
+    { code: 'H10.9', description: 'Konjungtivitis tanpa spesifikasi', chapter: 'VII' },
+    { code: 'H66.9', description: 'Otitis media tanpa spesifikasi', chapter: 'VIII' },
+    { code: 'I10', description: 'Hipertensi esensial (primer)', chapter: 'IX' },
+    { code: 'I48', description: 'Fibrilasi atrial dan flutter atrial', chapter: 'IX' },
+    { code: 'J00', description: 'Nazofaringitis akut (flu biasa)', chapter: 'X' },
+    { code: 'J02.9', description: 'Faringitis akut tanpa spesifikasi', chapter: 'X' },
+    { code: 'J03.9', description: 'Tonsilitis akut tanpa spesifikasi', chapter: 'X' },
+    { code: 'J06.9', description: 'Infeksi akut saluran napas atas tanpa spesifikasi', chapter: 'X' },
+    { code: 'J18.9', description: 'Pneumonia tanpa spesifikasi organisme', chapter: 'X' },
+    { code: 'J20.9', description: 'Bronkitis akut tanpa spesifikasi', chapter: 'X' },
+    { code: 'J30.4', description: 'Rinitis alergi tanpa spesifikasi', chapter: 'X' },
+    { code: 'J45.9', description: 'Asma tanpa spesifikasi', chapter: 'X' },
+    { code: 'K02.9', description: 'Karies gigi tanpa spesifikasi', chapter: 'XI' },
+    { code: 'K04.0', description: 'Pulpitis', chapter: 'XI' },
+    { code: 'K05.1', description: 'Gingivitis kronis', chapter: 'XI' },
+    { code: 'K21.0', description: 'Penyakit refluks gastroesofageal dengan esofagitis', chapter: 'XI' },
+    { code: 'K29.7', description: 'Gastritis tanpa spesifikasi', chapter: 'XI' },
+    { code: 'K30', description: 'Dispepsia (indigesti)', chapter: 'XI' },
+    { code: 'K52.9', description: 'Gastroenteritis dan kolitis noninfeksi tanpa spesifikasi', chapter: 'XI' },
+    { code: 'K59.0', description: 'Konstipasi', chapter: 'XI' },
+    { code: 'K76.0', description: 'Penyakit hati berlemak, tidak diklasifikasikan di tempat lain', chapter: 'XI' },
+    { code: 'L23.9', description: 'Dermatitis kontak alergi, penyebab tanpa spesifikasi', chapter: 'XII' },
+    { code: 'L24.9', description: 'Dermatitis kontak iritan, penyebab tanpa spesifikasi', chapter: 'XII' },
+    { code: 'L50.9', description: 'Urtikaria tanpa spesifikasi', chapter: 'XII' },
+    { code: 'M17.9', description: 'Osteoartritis lutut tanpa spesifikasi', chapter: 'XIII' },
+    { code: 'M54.5', description: 'Nyeri punggung bawah', chapter: 'XIII' },
+    { code: 'M79.1', description: 'Mialgia', chapter: 'XIII' },
+    { code: 'N30.0', description: 'Sistitis akut', chapter: 'XIV' },
+    { code: 'N39.0', description: 'Infeksi saluran kemih tanpa spesifikasi lokasi', chapter: 'XIV' },
+    { code: 'N76.0', description: 'Vaginitis akut', chapter: 'XIV' },
+    { code: 'O80', description: 'Persalinan tunggal spontan', chapter: 'XV' },
+    { code: 'R05', description: 'Batuk', chapter: 'XVIII' },
+    { code: 'R10.4', description: 'Nyeri abdomen lain dan yang tidak ditentukan (kolik abdomen)', chapter: 'XVIII' },
+    { code: 'R50.9', description: 'Demam tanpa spesifikasi', chapter: 'XVIII' },
+    { code: 'R51', description: 'Sakit kepala', chapter: 'XVIII' },
+    { code: 'Z00.0', description: 'Pemeriksaan kesehatan umum', chapter: 'XXI' },
+    { code: 'Z34.9', description: 'Pengawasan kehamilan normal tanpa spesifikasi', chapter: 'XXI' },
+  ]
+  await db.icd10Code.createMany({ data: icd10Seed.map((c) => ({ ...c, isSeedDemo: true })) })
+
+  const icd9Seed: { code: string; description: string; chapter: string }[] = [
+    { code: '21.1', description: 'Kontrol perdarahan hidung (epistaksis)', chapter: 'THT' },
+    { code: '41.31', description: 'Pungsi vena (pengambilan sampel darah vena)', chapter: 'Laboratorium' },
+    { code: '86.3', description: 'Insisi dan drainase kulit dan jaringan subkutan', chapter: 'Kulit' },
+    { code: '87.16', description: 'Rontgen toraks dua pandangan', chapter: 'Radiologi' },
+    { code: '87.41', description: 'Rontgen rahang dan gigi', chapter: 'Radiologi' },
+    { code: '88.61', description: 'SCT (CT scan) kepala', chapter: 'Radiologi' },
+    { code: '88.71', description: 'Ultrasonografi diagnostik abdomen lengkap', chapter: 'Radiologi' },
+    { code: '88.72', description: 'Ekokardiografi diagnostik', chapter: 'Radiologi' },
+    { code: '93.94', description: 'Fisioterapi lainnya', chapter: 'Rehabilitasi' },
+    { code: '99.18', description: 'Injeksi atau infus insulin', chapter: 'Farmasi' },
+    { code: '99.21', description: 'Injeksi antibiotik', chapter: 'Farmasi' },
+    { code: '99.39', description: 'Injeksi atau infus zat terapi/profilaksi lainnya', chapter: 'Farmasi' },
+  ]
+  await db.icd9CmCode.createMany({ data: icd9Seed.map((c) => ({ ...c, isSeedDemo: true })) })
+
+  const kfaSeed: { code: string; name: string; dosageForm: string; strength: string; unit: string }[] = [
+    { code: 'KFA-0001', name: 'Paracetamol', dosageForm: 'Tablet', strength: '500 mg', unit: 'tablet' },
+    { code: 'KFA-0002', name: 'Amoksisilin', dosageForm: 'Kapsul', strength: '500 mg', unit: 'kapsul' },
+    { code: 'KFA-0003', name: 'Sefiksim', dosageForm: 'Kapsul', strength: '100 mg', unit: 'kapsul' },
+    { code: 'KFA-0004', name: 'Azitromisin', dosageForm: 'Tablet', strength: '500 mg', unit: 'tablet' },
+    { code: 'KFA-0005', name: 'Ibuprofen', dosageForm: 'Tablet', strength: '400 mg', unit: 'tablet' },
+    { code: 'KFA-0006', name: 'Amlodipin', dosageForm: 'Tablet', strength: '10 mg', unit: 'tablet' },
+    { code: 'KFA-0007', name: 'Kaptopril', dosageForm: 'Tablet', strength: '25 mg', unit: 'tablet' },
+    { code: 'KFA-0008', name: 'Metformin', dosageForm: 'Tablet', strength: '500 mg', unit: 'tablet' },
+    { code: 'KFA-0009', name: 'Glibenklamid', dosageForm: 'Tablet', strength: '5 mg', unit: 'tablet' },
+    { code: 'KFA-0010', name: 'Omeprazol', dosageForm: 'Kapsul', strength: '20 mg', unit: 'kapsul' },
+    { code: 'KFA-0011', name: 'Ranitidin', dosageForm: 'Tablet', strength: '150 mg', unit: 'tablet' },
+    { code: 'KFA-0012', name: 'Cetirizin', dosageForm: 'Tablet', strength: '10 mg', unit: 'tablet' },
+    { code: 'KFA-0013', name: 'Loratadin', dosageForm: 'Tablet', strength: '10 mg', unit: 'tablet' },
+    { code: 'KFA-0014', name: 'Salbutamol', dosageForm: 'Inhaler', strength: '100 mcg/dosis', unit: 'dosis' },
+    { code: 'KFA-0015', name: 'Prednison', dosageForm: 'Tablet', strength: '5 mg', unit: 'tablet' },
+    { code: 'KFA-0016', name: 'Deksametason', dosageForm: 'Tablet', strength: '0,5 mg', unit: 'tablet' },
+    { code: 'KFA-0017', name: 'Garam rehidrasi oral (ORS)', dosageForm: 'Sachet', strength: '20,5 g', unit: 'sachet' },
+    { code: 'KFA-0018', name: 'Fosfomisin', dosageForm: 'Sachet', strength: '3 g', unit: 'sachet' },
+    { code: 'KFA-0019', name: 'Vitamin B kompleks', dosageForm: 'Tablet', strength: '', unit: 'tablet' },
+    { code: 'KFA-0020', name: 'Asam mefenamat', dosageForm: 'Tablet', strength: '500 mg', unit: 'tablet' },
+    { code: 'KFA-0021', name: 'Gentamisin', dosageForm: 'Injeksi', strength: '80 mg/2 ml', unit: 'ampul' },
+    { code: 'KFA-0022', name: 'Betametason', dosageForm: 'Salep', strength: '0,1%', unit: 'tube' },
+  ]
+  await db.kfaCode.createMany({
+    data: kfaSeed.map((k) => ({ code: k.code, name: k.name, dosageForm: k.dosageForm, strength: k.strength || null, unit: k.unit, isSeedDemo: true })),
+  })
 
   // ---------- Praktik 1: dokter umum (CONTOH) ----------
   const praktikDokter = await db.organization.create({
@@ -169,7 +283,7 @@ async function main() {
         objectType: 'Organization',
         objectId: praktikDokter.id,
         summary:
-          'Data contoh fiktif (CONTOH) dibuat untuk Fase 0-2: profil praktik, pengguna, peran, pasien, kunjungan, catatan klinis, dan jejak audit. Seluruh data pasien FIKTIF.',
+          'Data contoh fiktif (CONTOH) dibuat untuk Fase 0-3: profil praktik, pengguna, peran, pasien, kunjungan, catatan klinis, kodifikasi ICD-10/ICD-9-CM, resep terstruktur, dan jejak audit. Seluruh data pasien FIKTIF. Katalog terminologi adalah subset contoh — produksi mengimpor katalog resmi Kemenkes.',
         ip: 'seed',
       },
       {
@@ -178,7 +292,7 @@ async function main() {
         objectType: 'Organization',
         objectId: praktikBidan.id,
         summary:
-          'Data contoh fiktif (CONTOH) dibuat untuk Fase 0-2: profil praktik, pengguna, peran, dan jejak audit. Praktik bidan belum berisi pasien contoh.',
+          'Data contoh fiktif (CONTOH) dibuat untuk Fase 0-3: profil praktik, pengguna, peran, dan jejak audit. Praktik bidan belum berisi pasien contoh.',
         ip: 'seed',
       },
     ],
@@ -273,7 +387,7 @@ async function main() {
       payerType: 'UMUM',
     },
   })
-  await db.clinicalNote.create({
+  const catatanJoko = await db.clinicalNote.create({
     data: {
       organizationId: praktikDokter.id,
       encounterId: encJoko.id,
@@ -288,9 +402,9 @@ async function main() {
       objective:
         'KU baik, BG 120/80 mmHg pada pemeriksaan ini, nadi 78x/menit reguler, sosok obesitas sentral. Jantung dan paru dalam batas normal.',
       supportingExam: null,
-      assessment: 'Hipertensi terkontrol kurang — pasien tidak patuh minum obat (teks bebas, kode ICD-10 menyusul Fase 3).',
+      assessment: 'Hipertensi terkontrol kurang — pasien tidak patuh minum obat.',
       plan: 'Lanjut amlodipin 10 mg 1x1. Edukasi kepatuhan minum obat dan diet rendah garam. Kontrol tekanan darah 2 minggu lagi.',
-      medsGiven: 'Amlodipin 10 mg tab No. 30 (detail resep terstruktur menyusul Fase 3).',
+      medsGiven: 'Amlodipin 10 mg tab No. 30.',
       otherServices: null,
       education:
         'Pasien dan keluarga dijelaskan pentingnya minum obat teratur, membatasi garam, dan memantau tekanan darah mingguan. Pasien menyatakan mengerti.',
@@ -298,6 +412,41 @@ async function main() {
       versionNumber: 1,
       lockedAt: lalu(3, 9, 45),
       lockedByUserId: andi.id,
+    },
+  })
+  // Fase 3 — kodifikasi CONTOH pada catatan terkunci Joko.
+  const icd10I10 = await db.icd10Code.findUniqueOrThrow({ where: { code: 'I10' } })
+  const kfaAmlodipin = await db.kfaCode.findUniqueOrThrow({ where: { code: 'KFA-0006' } })
+  await db.noteDiagnosis.create({
+    data: {
+      organizationId: praktikDokter.id,
+      noteId: catatanJoko.id,
+      icd10CodeId: icd10I10.id,
+      isPrimary: true,
+      noteText: 'Terkontrol kurang — tidak patuh minum obat',
+      enteredByUserId: andi.id,
+      lockedAt: lalu(3, 9, 45),
+    },
+  })
+  await db.prescription.create({
+    data: {
+      organizationId: praktikDokter.id,
+      noteId: catatanJoko.id,
+      number: 'RESEP-0001',
+      status: 'AKTIF',
+      createdByUserId: andi.id,
+      items: {
+        create: {
+          kfaCodeId: kfaAmlodipin.id,
+          drugName: 'Amlodipin 10 mg',
+          dose: '1 tablet',
+          route: 'ORAL',
+          frequency: '1x sehari',
+          durationDays: 30,
+          quantity: 'No. 30',
+          instructions: 'pagi setelah sarapan',
+        },
+      },
     },
   })
 
@@ -329,7 +478,7 @@ async function main() {
       objective:
         'KU baik, TD 110/70 mmHg, suhu 36,8°C. Suprapubik nyeri tekan ringan, CVA negatif bilateral.',
       supportingExam: 'Urine rutin (lab mitra CONTOH): lekosit esterase positif, nitrit positif.',
-      assessment: 'Infeksi saluran kemung bawah tanpa komplikasi (teks bebas, kode ICD-10 menyusul Fase 3).',
+      assessment: 'Infeksi saluran kemih bawah tanpa komplikasi.',
       plan: 'Fosfomisin 3 g dosis tunggal. Banyak minum. Kembali bila demam, mual, atau nyeri pinggang (rujukan).',
       medsGiven: 'Fosfomisin 3 g sachet No. 1.',
       otherServices: null,
@@ -339,6 +488,41 @@ async function main() {
       versionNumber: 1,
       lockedAt: lalu(1, 15, 40),
       lockedByUserId: andi.id,
+    },
+  })
+  // Fase 3 — kodifikasi CONTOH pada catatan terkunci Ani.
+  const icd10N390 = await db.icd10Code.findUniqueOrThrow({ where: { code: 'N39.0' } })
+  const kfaFosfomisin = await db.kfaCode.findUniqueOrThrow({ where: { code: 'KFA-0018' } })
+  await db.noteDiagnosis.create({
+    data: {
+      organizationId: praktikDokter.id,
+      noteId: catatanAni.id,
+      icd10CodeId: icd10N390.id,
+      isPrimary: true,
+      noteText: 'Tanpa komplikasi, gejala ringan',
+      enteredByUserId: andi.id,
+      lockedAt: lalu(1, 15, 40),
+    },
+  })
+  await db.prescription.create({
+    data: {
+      organizationId: praktikDokter.id,
+      noteId: catatanAni.id,
+      number: 'RESEP-0002',
+      status: 'AKTIF',
+      createdByUserId: andi.id,
+      items: {
+        create: {
+          kfaCodeId: kfaFosfomisin.id,
+          drugName: 'Fosfomisin 3 g',
+          dose: '1 sachet',
+          route: 'ORAL',
+          frequency: 'dosis tunggal',
+          durationDays: null,
+          quantity: 'No. 1',
+          instructions: 'larutkan dalam segelas air, minum sebelum tidur',
+        },
+      },
     },
   })
   // Versi 1 tersimpan (contoh amandemen): diagnosis awal sempat salah ketik.
@@ -351,7 +535,7 @@ async function main() {
       allergiesNote: 'Alergi sulfa — ruam setelah cotrimoxazole tahun 2022 (CONTOH).',
       objective: 'KU baik, TD 110/70 mmHg, suhu 38,6°C. Suprapubik nyeri tekan ringan, CVA negatif bilateral.',
       supportingExam: 'Urine rutin (lab mitra CONTOH): lekosit esterase positif, nitrit positif.',
-      assessment: 'Infeksi saluran kemung bawah dengan demam (teks bebas, kode ICD-10 menyusul Fase 3).',
+      assessment: 'Infeksi saluran kemung bawah dengan demam.',
       plan: 'Fosfomisin 3 g dosis tunggal. Banyak minum. Kembali bila demam, mual, atau nyeri pinggang (rujukan).',
       medsGiven: 'Fosfomisin 3 g sachet No. 1.',
       otherServices: null,
@@ -382,14 +566,14 @@ async function main() {
       payerNumber: '0001234567890',
     },
   })
-  await db.clinicalNote.create({
+  const catatanSiti = await db.clinicalNote.create({
     data: {
       organizationId: praktikDokter.id,
       encounterId: encSiti.id,
       patientId: pasienSiti.id,
       authorUserId: andi.id,
       status: 'DRAF',
-      subjective: 'Kontrol rutin kehamilan 26 minggu, tanpa keluhan. Janji bergerak baik.',
+      subjective: 'Kontrol rutin kehamilan 26 minggu, tanpa keluhan. Janin bergerak baik.',
       allergiesNote: 'Tidak ada alergi yang diketahui.',
       objective: '',
       assessment: '',
@@ -397,6 +581,18 @@ async function main() {
       medsGiven: '',
       education: '',
       versionNumber: 1,
+    },
+  })
+  // Fase 3 — contoh kode pada DRAF (masih dapat diubah penulisnya).
+  const icd10Z349 = await db.icd10Code.findUniqueOrThrow({ where: { code: 'Z34.9' } })
+  await db.noteDiagnosis.create({
+    data: {
+      organizationId: praktikDokter.id,
+      noteId: catatanSiti.id,
+      icd10CodeId: icd10Z349.id,
+      isPrimary: true,
+      noteText: 'Kehamilan 26 minggu',
+      enteredByUserId: andi.id,
     },
   })
 
@@ -415,13 +611,15 @@ async function main() {
 
   await db.organization.update({
     where: { id: praktikDokter.id },
-    data: { mrnCounter: 4 },
+    data: { mrnCounter: 4, rxCounter: 2 },
   })
 
-  console.log('Seed Fase 0-2 selesai (data fiktif CONTOH):')
+  console.log('Seed Fase 0-3 selesai (data fiktif CONTOH):')
   console.log(`- 2 praktik: "${praktikDokter.name}", "${praktikBidan.name}"`)
   console.log('- 7 pengguna fiktif, 10 keanggotaan, kata sandi semua akun:', PASSWORD)
   console.log('- 4 pasien fiktif (RM-0001 s.d. RM-0004), 4 kunjungan, 3 catatan (2 terkunci, 1 draf).')
+  console.log('- Katalog SUBSET CONTOH: 47 ICD-10, 12 ICD-9-CM, 22 KFA.')
+  console.log('- Kodifikasi CONTOH: 3 diagnosis (2 pada catatan terkunci, 1 pada draf); 2 resep (RESEP-0001/0002).')
 }
 
 main()

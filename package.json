@@ -1,6 +1,6 @@
 {
   "name": "esimantri",
-  "version": "0.2.0-fase2",
+  "version": "0.3.0-fase3",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",

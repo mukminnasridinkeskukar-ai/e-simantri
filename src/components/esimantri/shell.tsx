@@ -17,6 +17,7 @@ import {
   ScrollText,
   ShieldCheck,
   Stethoscope,
+  Tags,
   UserCog,
   UserRound,
   Users,
@@ -46,12 +47,14 @@ import { PasienView } from './pasien-view'
 import { KunjunganView } from './kunjungan-view'
 import { CatatanView } from './catatan-view'
 import { KelengkapanView } from './kelengkapan-view'
+import { TerminologiView } from './terminologi-view'
 
 export type ViewKey =
   | 'beranda'
   | 'pasien'
   | 'kunjungan'
   | 'catatan'
+  | 'terminologi'
   | 'kelengkapan'
   | 'praktik'
   | 'pengguna'
@@ -71,6 +74,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'pasien', label: 'Pasien', icon: UserRound, permission: 'pasien.lihat' },
   { key: 'kunjungan', label: 'Kunjungan', icon: DoorOpen, permission: 'kunjungan.lihat' },
   { key: 'catatan', label: 'Catatan Klinis', icon: Stethoscope, permission: 'catatan.klinis.lihat' },
+  { key: 'terminologi', label: 'Terminologi', icon: Tags, permission: 'terminologi.cari' },
   { key: 'kelengkapan', label: 'Kelengkapan', icon: ClipboardCheck, permission: 'kelengkapan.dasbor.lihat' },
   { key: 'praktik', label: 'Profil Praktik', icon: Building2, permission: 'praktik.profil.lihat' },
   { key: 'pengguna', label: 'Pengguna', icon: Users, permission: 'pengguna.lihat' },
@@ -217,7 +221,7 @@ export function Shell({
             {navList}
             <div className="mt-3 border-t pt-3">
               <Badge variant="secondary" className="w-full justify-center text-[11px]">
-                Fase 0–2 · Fondasi, kunjungan, catatan
+                Fase 0–3 · Kodifikasi & resep aktif
               </Badge>
             </div>
           </div>
@@ -230,6 +234,7 @@ export function Shell({
           {activeItem.key === 'pasien' && <PasienView state={state} />}
           {activeItem.key === 'kunjungan' && <KunjunganView state={state} />}
           {activeItem.key === 'catatan' && <CatatanView state={state} />}
+          {activeItem.key === 'terminologi' && <TerminologiView />}
           {activeItem.key === 'kelengkapan' && <KelengkapanView />}
           {activeItem.key === 'praktik' && <PraktikView state={state} />}
           {activeItem.key === 'pengguna' && <PenggunaView state={state} />}
@@ -243,8 +248,8 @@ export function Shell({
       <footer className="mt-auto border-t bg-card">
         <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-1 px-4 py-3 text-center text-[11px] text-muted-foreground sm:flex-row sm:text-left">
           <p>
-            e-SIMANTRI • Fase 0–2 (Fondasi, Registrasi & Kunjungan, Catatan Klinis) • Lingkungan
-            contoh: seluruh data fiktif bertanda CONTOH
+            e-SIMANTRI • Fase 0–3 (Fondasi, Kunjungan, Catatan Klinis, Terminologi & Resep) •
+            Lingkungan contoh: seluruh data fiktif bertanda CONTOH
           </p>
           <p>
             Belum tersertifikasi / belum siap produksi — patuh produksi memerlukan peninjauan

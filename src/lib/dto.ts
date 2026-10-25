@@ -179,6 +179,10 @@ export interface NoteDetailDTO extends NoteContentDTO {
   openedAt: string
   isAuthor: boolean
   completeness: CompletenessDTO
+  // Fase 3 — kodifikasi & resep terkait catatan
+  diagnoses: NoteDiagnosisDTO[]
+  procedures: NoteProcedureDTO[]
+  prescriptions: PrescriptionDTO[]
 }
 
 export interface CompletenessDTO {
@@ -194,9 +198,16 @@ export interface NoteVersionRowDTO {
   createdAt: string
 }
 
+// Snapshot kodifikasi yang tersimpan bersama versi (append-only)
+export interface NoteCodesSnapshotDTO {
+  diagnoses: { code: string; description: string; isPrimary: boolean; noteText: string | null }[]
+  procedures: { code: string; description: string; noteText: string | null }[]
+}
+
 export interface NoteVersionDetailDTO extends NoteVersionRowDTO {
   content: NoteContentDTO
   status: string
+  codes: NoteCodesSnapshotDTO | null
 }
 
 export interface CompletenessRowDTO {
@@ -217,4 +228,98 @@ export interface CompletenessDashboardDTO {
   catatanTerkunci: number
   tanpaCatatanTerkunci: number
   rows: CompletenessRowDTO[]
+}
+
+// ============================================================
+// Fase 3 — Terminologi, kodifikasi & resep terstruktur
+// ============================================================
+
+// Hasil pencarian katalog referensi global (ICD-10 / ICD-9-CM / KFA)
+export interface Icd10OptionDTO {
+  id: string
+  code: string
+  description: string
+  chapter: string | null
+}
+
+export interface Icd9CmOptionDTO {
+  id: string
+  code: string
+  description: string
+  chapter: string | null
+}
+
+export interface KfaOptionDTO {
+  id: string
+  code: string
+  name: string
+  dosageForm: string | null
+  strength: string | null
+  unit: string | null
+}
+
+// Diagnosis ICD-10 pada catatan (kode beku saat catatan terkunci)
+export interface NoteDiagnosisDTO {
+  id: string
+  icd10CodeId: string
+  code: string
+  description: string
+  isPrimary: boolean
+  noteText: string | null
+  locked: boolean
+  superseded: boolean
+  createdAt: string
+}
+
+// Tindakan ICD-9-CM pada catatan
+export interface NoteProcedureDTO {
+  id: string
+  icd9CmCodeId: string
+  code: string
+  description: string
+  noteText: string | null
+  locked: boolean
+  superseded: boolean
+  createdAt: string
+}
+
+export interface PrescriptionItemDTO {
+  id: string
+  kfaCodeId: string
+  kfaCode: string
+  drugName: string
+  dose: string | null
+  route: string
+  frequency: string | null
+  durationDays: number | null
+  quantity: string | null
+  instructions: string | null
+}
+
+export interface PrescriptionDTO {
+  id: string
+  number: string
+  status: 'AKTIF' | 'DIBATALKAN'
+  voidReason: string | null
+  voidedAt: string | null
+  items: PrescriptionItemDTO[]
+  createdAt: string
+}
+
+// Input penggantian set kode pada DRAF (pengganti penuh, seperti teks draf)
+export interface CodesInputDTO {
+  diagnoses: { icd10CodeId: string; isPrimary: boolean; noteText?: string | null }[]
+  procedures: { icd9CmCodeId: string; noteText?: string | null }[]
+}
+
+// Satu item resep yang dikirim dari UI
+export interface PrescriptionItemInputDTO {
+  kfaCodeId: string
+  drugName: string
+  dose?: string | null
+  route: string
+  frequency?: string | null
+  durationDays?: number | null
+  quantity?: string | null
+  instructions?: string | null
 }

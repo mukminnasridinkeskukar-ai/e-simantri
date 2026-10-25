@@ -130,21 +130,20 @@ async function main() {
   check('pasangan secret-kode TOTP terverifikasi', verifySync({ token, secret }).valid)
   check('kode salah ditolak', !verifySync({ token: '000000', secret }).valid)
 
-  // ---------- 6. Larangan modul Fase 3+ prematur ----------
-  console.log('\n[6] Fase 3+ belum dibangun prematur')
+  // ---------- 6. Larangan modul Fase 4+ prematur ----------
+  console.log('\n[6] Fase 4+ belum dibangun prematur')
   const datamodel = (Prisma.dmmf.datamodel as unknown as { models: { name: string }[] }) ?? {
     models: [],
   }
   const modelNames = datamodel.models.map((m) => m.name)
-  // Fase 3: terminologi ICD-10 / ICD-9-CM / KFA + resep terstruktur
-  // Fase 4: ringkasan & salinan pasien | Fase 5: SATUSEHAT | Fase 7-8: odontogram, klaim, rujukan
+  // Fase 0-3 sudah sah (termasuk katalog ICD-10/ICD-9-CM/KFA + resep);
+  // yang masih dilarang: ringkasan, salinan/consent, SATUSEHAT, odontogram, klaim, rujukan.
   const forbidden = [
-    'DiagnosisCode', 'Icd10Code', 'Icd9Code', 'KfaCode', 'TerminologyMap',
-    'Prescription', 'MedicationRequest', 'PatientSummary', 'SummaryDocument',
+    'PatientSummary', 'SummaryDocument', 'Consent',
     'FhirBundle', 'SatuSehatMapping', 'Odontogram', 'Claim', 'Referral',
   ]
   check(
-    'tidak ada tabel Fase 3+ pada skema (terminologi, SATUSEHAT, ringkasan, klaim datang nanti)',
+    'tidak ada tabel Fase 4+ pada skema (ringkasan, SATUSEHAT, klaim datang nanti)',
     !forbidden.some((f) => modelNames.includes(f)),
     `model: ${modelNames.join(', ')}`
   )

@@ -96,8 +96,11 @@ async function main() {
   const catatanJoko = catatanOrg1.find((c) => c.assessment?.includes('Hipertensi'))
   check('catatan tanpa amandemen punya 0 versi tersimpan', catatanJoko ? (await db.clinicalNoteVersion.count({ where: { noteId: catatanJoko.id } })) === 0 : false)
 
-  console.log('[6] Fase 3+ belum dibangun prematur')
-  check('tidak ada tabel resep/terminologi pada skema', !('medicationRequest' in db) && !('kodeDiagnosis' in db))
+  console.log('[6] Fase 4+ belum dibangun prematur')
+  check(
+    'tidak ada tabel ringkasan/SATUSEHAT/klaim pada skema (Fase 4+)',
+    !('patientSummary' in db) && !('satuSehatMapping' in db) && !('claim' in db) && !('consent' in db)
+  )
 
   console.log(`\n=== Hasil: ${passed} lulus, ${failed} gagal ===`)
   if (failed > 0) process.exit(1)

@@ -209,10 +209,22 @@ Centang satu per satu pada alamat Vercel Anda:
 | 5 | Buka **Profil Praktik** | Data praktik sesuai isian bootstrap Langkah 5 |
 | 6 | Tambah akun staf di **Pengguna** | Akun baru muncul pada daftar; tercatat di Jejak Audit |
 | 7 | Daftarkan pasien, buka kunjungan, tulis & kunci catatan (peran PPA) | No. RM otomatis; penguncian menolak bila bagian wajib PMK belum lengkap; setelah lengkap → catatan terkunci, kunjungan selesai |
-| 8 | Buka **Kelengkapan** (peran Penanggung Jawab / Rekam Medis) | Statistik kunjungan/catatan tampil tanpa membuka isi klinis |
-| 9 | Tinggalkan sesi > 60 menit lalu klik apa pun | Sesi berakhir otomatis (diminta masuk kembali) |
+| 8 | Pada catatan draf, cari dan pilih kode ICD-10 di kartu **Kodifikasi**, tambah resep dari katalog KFA, lalu kunci catatan | Kode & resep ikut beku saat catatan terkunci; resep salah hanya dapat **Dibatalkan** dengan alasan (tidak ada hapus) |
+| 9 | Buka menu **Terminologi** (peran PPA/PPA Pendamping/Rekam Medis) | Ketiga katalog tampil; pencarian katalog tidak menulis jejak akses klinis |
+| 10 | Buka **Kelengkapan** (peran Penanggung Jawab / Rekam Medis) | Statistik kunjungan/catatan tampil tanpa membuka isi klinis |
+| 11 | Tinggalkan sesi > 60 menit lalu klik apa pun | Sesi berakhir otomatis (diminta masuk kembali) |
 
-Bila semua tercentang, **Fase 0-2 berjalan di produksi** dan siap dicoba tim Anda.
+Bila semua tercentang, **Fase 0-3 berjalan di produksi** dan siap dicoba tim Anda.
+
+### Katalog terminologi pada produksi (WAJIB sebelum pengkodean nyata)
+
+Seed produksi (Langkah 5) TIDAK mengisi katalog ICD-10/ICD-9-CM/KFA —
+subset berlabel CONTOH sengaja tidak boleh masuk lingkungan produksi.
+Sebelum praktik memakai pengkodean sungguhan, impor katalog resmi
+Kemenkes ke tabel `Icd10Code`, `Icd9CmCode`, dan `KfaCode` (mis. lewat
+skrip `prisma db execute --file katalog.sql` atau skrip impor khusus).
+Sampai katalog diimpor, kartu Kodifikasi/Resep hanya dapat dipakai pada
+lingkungan demo ber-CONTOH.
 
 ---
 

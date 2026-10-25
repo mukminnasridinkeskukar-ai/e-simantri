@@ -16,15 +16,17 @@ datasource db {
 // ============================================================
 // e-SIMANTRI — Fase 0 (Fondasi) + Fase 1 (Registrasi & Kunjungan)
 //                 + Fase 2 (Catatan Klinis Dokter Umum)
+//                 + Fase 3 (Terminologi & Resep Terstruktur)
 // Modul aktif  : identity_access + audit + registration_encounter
-//                + clinical_note_dokter
+//                + clinical_note_dokter + terminology + prescription
 // Catatan      : Peran dan status disimpan sebagai String dan
 //                divalidasi di lapisan aplikasi (src/lib/roles.ts)
 //                agar penyempitan peran per praktik tetap lentur
 //                pada fase-fase berikutnya.
-//                Catatan klinis Fase 2 memakai teks terstruktur per
-//                bagian PMK 24/2022; terminologi ICD-10/ICD-9-CM/KFA
-//                dan resep terstruktur menyusul pada Fase 3.
+//                Katalog ICD-10/ICD-9-CM/KFA adalah data REFERENSI
+//                GLOBAL (bukan milik tenant, baca-saja di aplikasi);
+//                kode pada catatan beku saat catatan dikunci dan
+//                koreksinya hanya lewat amandemen beralasan.
 // ============================================================
 
 // Tenant = satu tempat praktik mandiri (satu legal entity / satu SIP penyelenggara)
@@ -43,6 +45,7 @@ model Organization {
   letterheadText String? // kop surat untuk dokumen/salinan (dipakai mulai Fase 4)
   status         String   @default("AKTIF") // AKTIF | NONAKTIF — praktik tutup tetap menjaga retensi isi RM
   mrnCounter     Int      @default(0) // penghitung nomor rekam medis per praktik (atomik via increment)
+  rxCounter      Int      @default(0) // penghitung nomor resep per praktik (atomik via increment)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -72,6 +75,9 @@ model User {
   sessions    Session[]
   auditLogs   AuditLog[]
   authoredNotes ClinicalNote[]
+  enteredDiagnoses   NoteDiagnosis[]  @relation("DiagnosisDientri")
+  enteredProcedures  NoteProcedure[]  @relation("TindakanDientri")
+  voidedPrescriptions Prescription[] @relation("ResepDibatalkan")
 }
 
 // Keanggotaan: pengguna × praktik × peran.
@@ -236,6 +242,9 @@ model ClinicalNote {
   patient   Patient              @relation(fields: [patientId], references: [id])
   author    User                 @relation(fields: [authorUserId], references: [id])
   versions  ClinicalNoteVersion[]
+  diagnoses      NoteDiagnosis[]
+  procedures     NoteProcedure[]
+  prescriptions  Prescription[]
 
   @@index([organizationId, status])
   @@index([authorUserId])
@@ -266,6 +275,146 @@ model ClinicalNoteVersion {
 
   note ClinicalNote @relation(fields: [noteId], references: [id])
 
+  /// Snapshot kodifikasi (diagnosis ICD-10 + tindakan ICD-9-CM)
+  /// milik versi ini dalam format JSON — diisi saat amandemen
+  /// menyimpan versi sebelumnya (append-only, tidak pernah diubah).
+  codesSnapshot String?
+
   @@unique([noteId, versionNumber])
   @@index([noteId])
+}
+
+// ============================================================
+// FASE 3 — Terminologi: katalog referensi GLOBAL (baca-saja).
+// Bukan milik tenant: seluruh praktik memakai katalog yang sama.
+// Seed aplikasi hanya memuat SUBSET CONTOH; produksi wajib
+// mengimpor katalog resmi Kemenkes (ICD-10, ICD-9-CM, KFA).
+// Tidak ada aksi ubah/hapus katalog di lapisan aplikasi.
+// ============================================================
+
+model Icd10Code {
+  id          String  @id @default(cuid())
+  code        String  @unique // mis. "I10" (subset CONTOH berformat kode nyata)
+  description String // judul kode (teks pendek)
+  chapter     String? // bab ICD-10 untuk pengelompokan tampilan
+  isSeedDemo  Boolean @default(false) // penanda subset demo — bukan katalog resmi lengkap
+
+  diagnoses NoteDiagnosis[]
+}
+
+model Icd9CmCode {
+  id          String  @id @default(cuid())
+  code        String  @unique // mis. "99.21"
+  description String
+  chapter     String?
+  isSeedDemo  Boolean @default(false)
+
+  procedures NoteProcedure[]
+}
+
+model KfaCode {
+  id          String  @id @default(cuid())
+  code        String  @unique // kode KFA — subset CONTOH memakai format KFA-xxxx (sintetis)
+  name        String // nama obat/alkes (nama generik + merek pemerintah)
+  dosageForm  String? // bentuk sediaan: Tablet, Kapsul, Sirup, Sachet, Inhaler
+  strength    String? // kekuatan: "500 mg" dst.
+  unit        String? // satuan pemberian: tablet, kapsul, sachet, botol
+  isSeedDemo  Boolean @default(false)
+
+  prescriptionItems PrescriptionItem[]
+}
+
+// ============================================================
+// FASE 3 — Kodifikasi catatan (diagnosis ICD-10, tindakan ICD-9-CM)
+// Baris TIDAK dihapus setelah catatan terkunci: koreksi lewat
+// amandemen menandai baris lama dengan supersededAt dan menambah
+// baris baru (append-only). Saat draf, set kode bebas diubah
+// penulisnya — sama seperti teks draf.
+// ============================================================
+
+model NoteDiagnosis {
+  id              String    @id @default(cuid())
+  organizationId  String
+  noteId          String
+  icd10CodeId     String
+  isPrimary       Boolean   @default(false) // diagnosis utama (maks. satu disarankan)
+  noteText        String? // keterangan spesifik pasien, mis. "terkontrol kurang"
+  enteredByUserId String
+  createdAt       DateTime  @default(now())
+  lockedAt        DateTime? // terisi saat catatan dikunci (beku)
+  supersededAt    DateTime? // terisi bila baris digantikan lewat amandemen
+
+  note      ClinicalNote @relation(fields: [noteId], references: [id])
+  icd10     Icd10Code    @relation(fields: [icd10CodeId], references: [id])
+  enteredBy User         @relation("DiagnosisDientri", fields: [enteredByUserId], references: [id])
+
+  @@unique([noteId, icd10CodeId])
+  @@index([organizationId])
+}
+
+model NoteProcedure {
+  id              String    @id @default(cuid())
+  organizationId  String
+  noteId          String
+  icd9CmCodeId    String
+  noteText        String?
+  enteredByUserId String
+  createdAt       DateTime  @default(now())
+  lockedAt        DateTime?
+  supersededAt    DateTime?
+
+  note      ClinicalNote @relation(fields: [noteId], references: [id])
+  icd9Cm    Icd9CmCode   @relation(fields: [icd9CmCodeId], references: [id])
+  enteredBy User         @relation("TindakanDientri", fields: [enteredByUserId], references: [id])
+
+  @@unique([noteId, icd9CmCodeId])
+  @@index([organizationId])
+}
+
+// ============================================================
+// FASE 3 — Resep terstruktur (resep terkait catatan/kunjungan).
+// TIDAK ADA hapus: resep yang salah DIBATALKAN (status + alasan
+// wajib) dan tetap tersimpan. Isi item hanya dapat diubah selama
+// catatan masih DRAF dan oleh penulisnya; setelah kunci beku.
+// ============================================================
+
+model Prescription {
+  id              String    @id @default(cuid())
+  organizationId  String
+  noteId          String
+  number          String // nomor resep unik per praktik: RESEP-0001 dst.
+  status          String    @default("AKTIF") // AKTIF | DIBATALKAN
+  voidReason      String? // alasan pembatalan — wajib saat membatalkan
+  voidedAt        DateTime?
+  voidedByUserId  String?
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  note     ClinicalNote       @relation(fields: [noteId], references: [id])
+  items    PrescriptionItem[]
+  voidedBy User?              @relation("ResepDibatalkan", fields: [voidedByUserId], references: [id])
+
+  @@unique([organizationId, number])
+  @@index([organizationId])
+  @@index([noteId])
+}
+
+model PrescriptionItem {
+  id             String   @id @default(cuid())
+  prescriptionId String
+  kfaCodeId      String
+  drugName       String // snapshot nama obat + kekuatan saat resep dibuat
+  dose           String? // mis. "1 tablet"
+  route          String // jalur pemberian: ORAL, TOPIKAL, INHALASI, INJEKSI, LAINNYA
+  frequency      String? // mis. "3x sehari"
+  durationDays   Int?
+  quantity       String? // mis. "No. 10"
+  instructions   String? // signa lengkap/catatan: "sesudah makan"
+  createdAt      DateTime @default(now())
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id])
+  kfaCode      KfaCode      @relation(fields: [kfaCodeId], references: [id])
+
+  @@index([prescriptionId])
 }

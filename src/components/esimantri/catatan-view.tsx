@@ -60,14 +60,23 @@ import type {
   NoteVersionRowDTO,
 } from '@/lib/dto'
 import {
-  amendNoteAction,
-  getNoteAction,
   getNoteVersionDetailAction,
-  listEncountersForNoteAction,
   listNoteVersionsAction,
   lockNoteAction,
   saveDraftNoteAction,
+  amendNoteAction,
+  getNoteAction,
+  listEncountersForNoteAction,
 } from '@/server/clinical'
+import {
+  CodesReadOnly,
+  DiagnosisEditor,
+  KodifikasiCard,
+  ProcedureEditor,
+  ResepCard,
+  type DxEditRow,
+  type PrEditRow,
+} from './catatan-kodifikasi'
 
 function fmtDT(iso: string | null): string {
   if (!iso) return '—'
@@ -201,17 +210,21 @@ function Worklist({
   onSelect: (e: EncounterRowDTO) => void
   canNote: boolean
 }) {
+  // Fase 3 — dua daftar: kunjungan yang menunggu dokumentasi dan
+  // catatan milik sendiri (termasuk TERKUNCI, untuk melihat kode,
+  // resep, membatalkan resep, atau amandemen).
+  const [scope, setScope] = useState<'PERLU_DOKUMENTASI' | 'CATATAN_SAYA'>('PERLU_DOKUMENTASI')
   const [rows, setRows] = useState<EncounterRowDTO[] | null>(null)
 
   useEffect(() => {
     let active = true
-    listEncountersForNoteAction('PERLU_DOKUMENTASI').then((data) => {
+    listEncountersForNoteAction(scope).then((data) => {
       if (active) setRows(data)
     })
     return () => {
       active = false
     }
-  }, [reload])
+  }, [reload, scope])
 
   if (rows === null)
     return (
@@ -223,13 +236,19 @@ function Worklist({
     )
   if (rows.length === 0)
     return (
-      <p className="p-2 text-center text-sm text-muted-foreground">
-        Tidak ada kunjungan yang menunggu dokumentasi.
-      </p>
+      <div className="space-y-2">
+        <ScopeTabs scope={scope} setScope={setScope} />
+        <p className="p-2 text-center text-sm text-muted-foreground">
+          {scope === 'PERLU_DOKUMENTASI'
+            ? 'Tidak ada kunjungan yang menunggu dokumentasi.'
+            : 'Anda belum menulis catatan pada praktik ini.'}
+        </p>
+      </div>
     )
 
   return (
     <div className="max-h-[28rem] space-y-1.5 overflow-y-auto pr-1">
+      <ScopeTabs scope={scope} setScope={setScope} />
       {rows.map((e) => (
         <button
           key={e.id}
@@ -242,10 +261,10 @@ function Worklist({
           <div className="flex items-center justify-between gap-2">
             <p className="truncate text-sm font-medium">{e.patientName}</p>
             <Badge
-              variant={e.noteStatus === 'DRAF' ? 'secondary' : 'outline'}
+              variant={e.noteStatus === 'TERKUNCI' ? 'default' : e.noteStatus === 'DRAF' ? 'secondary' : 'outline'}
               className="shrink-0 text-[10px]"
             >
-              {e.noteStatus === 'DRAF' ? 'Draf' : 'Belum ada catatan'}
+              {e.noteStatus === 'DRAF' ? 'Draf' : e.noteStatus === 'TERKUNCI' ? 'Terkunci' : 'Belum ada catatan'}
             </Badge>
           </div>
           <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
@@ -264,6 +283,41 @@ function Worklist({
           Anda dapat membaca catatan untuk tugas kelola; setiap pembukaan tercatat di jejak audit.
         </p>
       )}
+    </div>
+  )
+}
+
+function ScopeTabs({
+  scope,
+  setScope,
+}: {
+  scope: 'PERLU_DOKUMENTASI' | 'CATATAN_SAYA'
+  setScope: (s: 'PERLU_DOKUMENTASI' | 'CATATAN_SAYA') => void
+}) {
+  return (
+    <div className="flex gap-1 rounded-md bg-muted p-1" role="tablist" aria-label="Pilih daftar catatan">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={scope === 'PERLU_DOKUMENTASI'}
+        onClick={() => setScope('PERLU_DOKUMENTASI')}
+        className={`min-h-9 flex-1 rounded px-2 text-xs font-medium transition-colors ${
+          scope === 'PERLU_DOKUMENTASI' ? 'bg-card shadow-sm' : 'text-muted-foreground'
+        }`}
+      >
+        Perlu dokumentasi
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={scope === 'CATATAN_SAYA'}
+        onClick={() => setScope('CATATAN_SAYA')}
+        className={`min-h-9 flex-1 rounded px-2 text-xs font-medium transition-colors ${
+          scope === 'CATATAN_SAYA' ? 'bg-card shadow-sm' : 'text-muted-foreground'
+        }`}
+      >
+        Catatan saya
+      </button>
     </div>
   )
 }
@@ -394,7 +448,17 @@ function NoteEditor({
       )}
 
       {locked ? (
-        <LockedNoteBody note={note} />
+        <>
+          <LockedNoteBody note={note} />
+          {/* Fase 3 — resep terkunci tampil baca-saja; penulis masih dapat membatalkan */}
+          <ResepCard
+            note={note}
+            encounterId={encounter.id}
+            editable={false}
+            onReloadNote={onReloadNote}
+            onSaved={onSaved}
+          />
+        </>
       ) : (
         <>
           <NoteForm content={content} setContent={setContent} disabled={!editable} />
@@ -420,6 +484,20 @@ function NoteEditor({
               mengubah dan menguncinya.
             </p>
           )}
+          {/* Fase 3 — kodifikasi & resep (mengikuti status draf catatan) */}
+          <KodifikasiCard
+            note={note}
+            encounterId={encounter.id}
+            editable={editable}
+            onSaved={onSaved}
+          />
+          <ResepCard
+            note={note}
+            encounterId={encounter.id}
+            editable={editable}
+            onReloadNote={onReloadNote}
+            onSaved={onSaved}
+          />
         </>
       )}
 
@@ -568,7 +646,14 @@ function VersionRow({ encounterId, version }: { encounterId: string; version: No
                   : 'Versi tidak dapat dimuat.'}
             </DialogDescription>
           </DialogHeader>
-          {detail && <ContentReadOnly content={detail.content} />}
+          {detail && (
+            <div className="space-y-3">
+              <ContentReadOnly content={detail.content} />
+              {detail.codes && (
+                <CodesReadOnly diagnoses={detail.codes.diagnoses} procedures={detail.codes.procedures} />
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </button>
@@ -632,7 +717,7 @@ function NoteForm({
         />
         <SectionField
           id="dx"
-          label="Diagnosis * (teks bebas — kode ICD-10 menyusul Fase 3)"
+          label="Diagnosis * (teks klinis — kodifikasi ICD-10 pada kartu Kodifikasi di bawah)"
           value={content.assessment ?? ''}
           onChange={(v) => setContent({ ...content, assessment: v })}
           disabled={disabled}
@@ -648,7 +733,7 @@ function NoteForm({
         />
         <SectionField
           id="obat"
-          label="Obat/tindakan yang diberikan * (detail resep menyusul Fase 3)"
+          label="Obat/tindakan yang diberikan * (resep terstruktur pada kartu Resep di bawah)"
           value={content.medsGiven ?? ''}
           onChange={(v) => setContent({ ...content, medsGiven: v })}
           disabled={disabled}
@@ -750,6 +835,20 @@ function LockedNoteBody({ note }: { note: NoteDetailDTO | null }) {
         Kunjungan dibuka {fmtDT(note.openedAt)} · Dikunci {fmtDT(note.lockedAt)}
       </p>
       <ContentReadOnly content={note} />
+      <CodesReadOnly
+        diagnoses={(note.diagnoses ?? []).map((d) => ({
+          code: d.code,
+          description: d.description,
+          isPrimary: d.isPrimary,
+          noteText: d.noteText,
+        }))}
+        procedures={(note.procedures ?? []).map((p) => ({
+          code: p.code,
+          description: p.description,
+          noteText: p.noteText,
+        }))}
+      />
+      {/* Resep terkunci tampil baca-saja pada kartu Resep di bawah */}
     </div>
   )
 }
@@ -773,6 +872,8 @@ function AmendDialog({
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dxRows, setDxRows] = useState<DxEditRow[]>([])
+  const [prRows, setPrRows] = useState<PrEditRow[]>([])
 
   useEffect(() => {
     if (open && note) {
@@ -788,6 +889,23 @@ function AmendDialog({
         education: note.education ?? '',
         followUpPlan: note.followUpPlan ?? '',
       })
+      setDxRows(
+        (note.diagnoses ?? []).map((d) => ({
+          icd10CodeId: d.icd10CodeId,
+          code: d.code,
+          description: d.description,
+          isPrimary: d.isPrimary,
+          noteText: d.noteText ?? '',
+        }))
+      )
+      setPrRows(
+        (note.procedures ?? []).map((p) => ({
+          icd9CmCodeId: p.icd9CmCodeId,
+          code: p.code,
+          description: p.description,
+          noteText: p.noteText ?? '',
+        }))
+      )
       setReason('')
       setError(null)
     }
@@ -798,7 +916,22 @@ function AmendDialog({
     setBusy(true)
     setError(null)
     try {
-      const res = await amendNoteAction(note.encounterId, content, reason)
+      const res = await amendNoteAction(
+        note.encounterId,
+        content,
+        reason,
+        {
+          diagnoses: dxRows.map((d) => ({
+            icd10CodeId: d.icd10CodeId,
+            isPrimary: d.isPrimary,
+            noteText: d.noteText || null,
+          })),
+          procedures: prRows.map((p) => ({
+            icd9CmCodeId: p.icd9CmCodeId,
+            noteText: p.noteText || null,
+          })),
+        }
+      )
       if (res.ok) await onDone()
       else setError(res.error ?? 'Amandemen gagal.')
     } finally {
@@ -812,12 +945,19 @@ function AmendDialog({
         <DialogHeader>
           <DialogTitle>Amandemen catatan terkunci</DialogTitle>
           <DialogDescription>
-            Isi versi {note.versionNumber} dipertahankan sebagai riwayat. Alasan wajib diisi
-            dan seluruh perubahan tercatat pada jejak audit.
+            Isi versi {note.versionNumber} dipertahankan sebagai riwayat (termasuk kodifikasi
+            saat itu). Alasan wajib diisi dan seluruh perubahan tercatat pada jejak audit.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           <NoteForm content={content} setContent={setContent} disabled={false} />
+          <div className="space-y-4 rounded-md border p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Koreksi kodifikasi (baris lama tetap tersimpan)
+            </p>
+            <DiagnosisEditor rows={dxRows} onChange={setDxRows} />
+            <ProcedureEditor rows={prRows} onChange={setPrRows} />
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="amandemen-alasan">Alasan amandemen *</Label>
             <Input

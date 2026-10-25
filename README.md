@@ -4,9 +4,9 @@ Aplikasi rekam medis elektronik (RME) untuk **praktik mandiri** di Indonesia
 (dokter, dokter gigi, bidan, perawat, apoteker, ahli gizi, fisioterapis).
 Bukan SIMRS rumah sakit.
 
-**Status: Fase 0–2 — Fondasi, Registrasi & Kunjungan, Catatan Klinis Dokter Umum** (boleh dicoba; Fase 3 belum dibangun).
+**Status: Fase 0–3 — Fondasi, Registrasi & Kunjungan, Catatan Klinis, Terminologi & Resep Terstruktur** (boleh dicoba; Fase 4 belum dibangun).
 
-## Yang sudah bisa dipakai (Fase 0–2)
+## Yang sudah bisa dipakai (Fase 0–3)
 
 - Kerangka aplikasi multi-tenant: satu organisasi = satu tempat praktik
   (satu badan hukum / satu SIP penyelenggara).
@@ -30,13 +30,27 @@ Bukan SIMRS rumah sakit.
   amandemen beralasan (versi lama dipertahankan dan dapat dibuka), dasbor
   kelengkapan untuk Rekam Medis/Penanggung Jawab, dan audit otomatis atas
   setiap pembukaan catatan oleh pihak bukan penulis.
+- **Fase 3 — Terminologi & resep terstruktur:** kodifikasi diagnosis
+  (ICD-10) dan tindakan (ICD-9-CM) dari katalog referensi global
+  (baca-saja); kode beku saat catatan dikunci, koreksi hanya lewat
+  amandemen beralasan — baris lama ditandai `supersededAt` dan snapshot
+  kode tersimpan pada versi (append-only, tanpa hapus); resep terstruktur
+  bernomor per praktik dengan obat KFA, jalur pemberian, dosis/frekuensi/
+  lama/jumlah/keterangan signa; resep salah **dibatalkan beralasan**, tidak
+  pernah dihapus; peramban Terminologi untuk menelusuri ketiga katalog;
+  daftar kerja catatan kini punya tab "Catatan saya" untuk menjangkau
+  catatan terkunci milik sendiri.
 
 ## Yang sengaja ditunda (agar tidak melompat)
 
-- Kode ICD-10/ICD-9-CM, obat KFA, dan resep terstruktur (Fase 3),
-  resume/salinan (Fase 4), adapter SATUSEHAT (Fase 5, sandbox saja),
+- Resume/salinan (Fase 4), adapter SATUSEHAT (Fase 5, sandbox saja),
   portal pasien (Fase 6), templat profesi lain & odontogram (Fase 7),
   klaim/rujukan (Fase 8).
+
+> **Katalog terminologi:** seed CONTOH hanya memuat **subset** ICD-10,
+> ICD-9-CM, dan KFA (kode KFA demo memakai format sintetis `KFA-xxxx`).
+> Instalasi produksi **wajib** mengimpor katalog resmi Kemenkes sebelum
+> pengkodean nyata — lihat DEPLOYMENT.md.
 
 ## Teknologi
 
@@ -67,8 +81,9 @@ penulis catatan contoh), `sari@praktik-contoh.id` (PPA Pendamping),
 (Rekam Medis), `budi@praktik-contoh.id` (Kasir), `admin@praktik-contoh.id`
 (Admin Teknis), `dewi@praktik-contoh.id` (PJ praktik bidan).
 
-Uji verifikasi otomatis: `bun tests/verify-phase0.ts` dan
-`bun tests/verify-fase12.ts` (database harus berisi seed CONTOH).
+Uji verifikasi otomatis: `bun tests/verify-phase0.ts`,
+`bun tests/verify-fase12.ts`, dan `bun tests/verify-fase3.ts`
+(database harus berisi seed CONTOH).
 
 ## Deploy produksi
 
