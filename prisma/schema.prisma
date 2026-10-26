@@ -1,420 +1,547 @@
+// ============================================================
+// e-SIMANTRI — Sistem Informasi Manajemen Praktik Mandiri Terintegrasi
+// Rilis 1.0.0 — seluruh modul Fase 0–8: fondasi (tenant, identitas & akses,
+// audit, profil praktik), registry, kunjungan, catatan klinis berversi,
+// terminologi (ICD-10/ICD-9-CM/KFA), resep, tindakan, persetujuan (consent),
+// tagihan, rujukan, adapter SATUSEHAT (outbox + FHIR R4), portal pasien,
+// serta mutu & retensi.
+//
+// Catatan arsitektur:
+// - Setiap blok model diawali komentar modul (identity_access, audit, dst.)
+//   sesuai kontrak modul pada dokumen arsitektur e-SIMANTRI.
+// - SQLite tidak mendukung enum Prisma; nilai terbatasi di lapisan
+//   aplikasi (lihat src/lib/modules/identity_access/roles.ts).
+// - Varian PostgreSQL (Supabase) dibuat otomatis dari berkas ini:
+//   node scripts/buat-skema-postgres.mjs  →  prisma/schema.postgres.prisma
+// ============================================================
+
 generator client {
   provider = "prisma-client-js"
 }
 
-// PostgreSQL — identik untuk pengembangan lokal maupun Neon produksi.
-// - DATABASE_URL : koneksi runtime. Di Neon gunakan endpoint *pooled*
-//   (nama host mengandung "-pooler") agar aman untuk lingkungan serverless.
-// - DIRECT_URL   : koneksi untuk migrasi (`prisma migrate`). Di Neon gunakan
-//   endpoint *direct* (tanpa "-pooler"). Di lokal isi sama dengan DATABASE_URL.
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================================
-// e-SIMANTRI — Fase 0 (Fondasi) + Fase 1 (Registrasi & Kunjungan)
-//                 + Fase 2 (Catatan Klinis Dokter Umum)
-//                 + Fase 3 (Terminologi & Resep Terstruktur)
-// Modul aktif  : identity_access + audit + registration_encounter
-//                + clinical_note_dokter + terminology + prescription
-// Catatan      : Peran dan status disimpan sebagai String dan
-//                divalidasi di lapisan aplikasi (src/lib/roles.ts)
-//                agar penyempitan peran per praktik tetap lentur
-//                pada fase-fase berikutnya.
-//                Katalog ICD-10/ICD-9-CM/KFA adalah data REFERENSI
-//                GLOBAL (bukan milik tenant, baca-saja di aplikasi);
-//                kode pada catatan beku saat catatan dikunci dan
-//                koreksinya hanya lewat amandemen beralasan.
+// MODUL: identity_access — tenant, pengguna, keanggotaan, peran, sesi
 // ============================================================
 
-// Tenant = satu tempat praktik mandiri (satu legal entity / satu SIP penyelenggara)
+/// Organisasi = satu tempat praktik mandiri (satu SIP penyelenggara).
+/// Seluruh data klinis fase berikutnya wajib terlingkup organizationId.
 model Organization {
-  id             String   @id @default(cuid())
-  name           String
-  practiceType   String   @default("PRAKTIK_DOKTER") // jenis praktik mandiri
-  sipNumber      String? // SIP penyelenggara praktik (bukan SIP pribadi nakes)
-  ownerName      String? // nama penanggung jawab sesuai dokumen
-  address        String?
-  city           String?
-  province       String?
-  postalCode     String?
-  phone          String?
-  email          String?
-  letterheadText String? // kop surat untuk dokumen/salinan (dipakai mulai Fase 4)
-  status         String   @default("AKTIF") // AKTIF | NONAKTIF — praktik tutup tetap menjaga retensi isi RM
-  mrnCounter     Int      @default(0) // penghitung nomor rekam medis per praktik (atomik via increment)
-  rxCounter      Int      @default(0) // penghitung nomor resep per praktik (atomik via increment)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(cuid())
+  name          String
+  practiceType  String   @default("DOKTER_UMUM") // DOKTER_UMUM | DOKTER_GIGI | NAKES_LAIN | CAMPURAN
+  sipNumber     String? // SIP penyelenggara tempat praktik
+  address       String?
+  phone         String?
+  email         String?
+  headName      String? // nama penanggung jawab profesional (untuk kop/dokumen)
+  isSample      Boolean  @default(false) // true = data contoh fiktif, ditandai CONTOH di UI
+  status        String   @default("AKTIF") // AKTIF | NONAKTIF | DITUTUP (penutupan TIDAK menghapus isi rekam medis; retensi 25 tahun)
+  locations     Location[]
+  memberships   Membership[]
+  auditLogs     AuditLog[]
+  patients      Patient[]
+  encounters    Encounter[]
+  satusehatConfig SatusehatConfig?
+  outboxEvents  OutboxEvent[]
+  portalAccess  PortalAccess[]
 
-  memberships Membership[]
-  auditLogs   AuditLog[]
-  patients    Patient[]
-  encounters  Encounter[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-model User {
-  id                 String   @id @default(cuid())
-  fullName           String
-  email              String   @unique
-  passwordHash       String // bcrypt — jangan pernah menyimpan plaintext
-  phone              String?
-  profession         String? // Dokter, Dokter Gigi, Bidan, Perawat, dst.
-  strNumber          String? // STR — wajib bagi yang menandatangani catatan klinis (divalidasi di Fase 2)
-  sipNumber          String? // SIP/SIPP pribadi bila ada
-  isActive           Boolean  @default(true)
-  totpSecret         String? // secret TOTP — hanya berada di server
-  totpEnabled        Boolean  @default(false)
-  mustChangePassword Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  memberships Membership[]
-  sessions    Session[]
-  auditLogs   AuditLog[]
-  authoredNotes ClinicalNote[]
-  enteredDiagnoses   NoteDiagnosis[]  @relation("DiagnosisDientri")
-  enteredProcedures  NoteProcedure[]  @relation("TindakanDientri")
-  voidedPrescriptions Prescription[] @relation("ResepDibatalkan")
-}
-
-// Keanggotaan: pengguna × praktik × peran.
-// Satu pengguna boleh punya lebih dari satu peran di praktik yang sama
-// (mis. Penanggung Jawab sekaligus PPA) dan peran berbeda antarpraktik.
-model Membership {
-  id             String   @id @default(cuid())
-  userId         String
+/// Lokasi praktik di dalam organisasi (dipakai nanti untuk Location SATUSEHAT).
+model Location {
+  id             String       @id @default(cuid())
   organizationId String
-  role           String // salah satu dari ROLE_KEYS di src/lib/roles.ts
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  description    String?
+  isPrimary      Boolean      @default(false)
 
-  user         User         @relation(fields: [userId], references: [id])
-  organization Organization @relation(fields: [organizationId], references: [id])
-  sessions     Session[]
+  createdAt DateTime @default(now())
 
-  @@unique([userId, organizationId, role])
   @@index([organizationId])
 }
 
-model Session {
-  id                 String    @id @default(cuid())
-  tokenHash          String    @unique // sha256 dari token cookie; token mentah tidak pernah disimpan
-  userId             String
-  activeMembershipId String? // praktik+peran yang sedang aktif; sumber kebenaran tenant di sisi server
-  pending2FA         Boolean   @default(false)
-  createdAt          DateTime  @default(now())
-  lastSeenAt         DateTime  @default(now())
-  expiresAt          DateTime // batas absolut sesi
-  revokedAt          DateTime?
-  ip                 String?
-  userAgent          String?
+/// Pengguna aplikasi (akun). Bisa tergabung di lebih dari satu organisasi.
+model User {
+  id               String     @id @default(cuid())
+  email            String     @unique
+  passwordHash     String
+  fullName         String
+  profession       String? // Dokter | Dokter Gigi | Perawat | Bidan | Apoteker | Ahli Gizi | Fisioterapis | Terapis Wicara | Okupasi Terapis | Analis Kesehatan | Psikolog Klinis | Staf Administrasi | Lainnya
+  strNumber        String? // nomor STR profesional (jika ada)
+  sipNumber        String? // nomor SIP/SIPP individu (jika ada)
+  phone            String?
+  isActive         Boolean    @default(true) // false = tidak bisa masuk; TIDAK menghapus jejak audit
+  twoFactorEnabled Boolean    @default(false) // disiapkan untuk peran klinis/PJ (belum aktif pada Fase 0)
+  memberships      Membership[]
+  sessions         Session[]
+  auditLogs        AuditLog[]
 
-  user             User        @relation(fields: [userId], references: [id])
-  activeMembership Membership? @relation(fields: [activeMembershipId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Keanggotaan pengguna pada satu organisasi. Peran bisa berbeda per organisasi.
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  status         String       @default("AKTIF") // AKTIF | NONAKTIF
+  joinedAt       DateTime     @default(now())
+  roles          MembershipRole[]
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+/// Peran pada sebuah keanggotaan (banyak peran per keanggotaan diperbolehkan,
+/// contoh: penanggung jawab praktik yang juga PPA dokter).
+model MembershipRole {
+  id           String     @id @default(cuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role         String // PENANGGUNG_JAWAB | PPA | PPA_PENDAMPING | PENDAFTARAN | REKAM_MEDIS | KASIR | PASIEN | ADMIN_TEKNIS
+
+  @@unique([membershipId, role])
+  @@index([membershipId])
+}
+
+/// Sesi autentikasi. Kuki hanya menyimpan token acak; DB menyimpan hash-nya.
+model Session {
+  id                   String   @id @default(cuid())
+  tokenHash            String   @unique
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id])
+  activeOrganizationId String? // organisasi aktif; SELALU diambil dari DB, tidak pernah dipercaya dari browser
+  expiresAt            DateTime
+  ipAddress            String?
+  userAgent            String?
+
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
 
   @@index([userId])
 }
 
-// Jejak audit — append-only. Tidak tersedia fungsi ubah/hapus di lapisan aplikasi.
-model AuditLog {
-  id             String   @id @default(cuid())
-  organizationId String? // null = peristiwa global (mis. login sebelum memilih praktik)
-  actorUserId    String?
-  actorName      String? // snapshot nama pelaku saat aksi
-  actorRole      String? // snapshot peran aktif saat aksi
-  action         String // mis. MASUK_BERHASIL, PENGGUNA_DITAMBAHKAN
-  objectType     String? // mis. Session, User, Membership, Organization
-  objectId       String?
-  summary        String // ringkasan manusiawi dalam Bahasa Indonesia
-  reason         String? // alasan bila akses tidak rutin (break-glass — Fase lanjutan)
-  ip             String?
-  userAgent      String?
-  sessionId      String?
-  createdAt      DateTime @default(now())
+// ============================================================
+// MODUL: audit — jejak audit append-only
+// Tidak menyediakan jalur ubah/hapus di lapisan aplikasi apa pun.
+// ============================================================
 
-  organization Organization? @relation(fields: [organizationId], references: [id])
-  actor        User?         @relation(fields: [actorUserId], references: [id])
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String? // null = peristiwa lintas organisasi (mis. login sebelum memilih praktik)
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id])
+  userLabel      String? // snapshot nama pengguna saat peristiwa
+  roleLabel      String? // snapshot peran saat peristiwa (dipisah koma)
+  action         String // LOGIN | LOGIN_GAGAL | LOGOUT | GANTI_ORGANISASI | TAMBAH_PENGGUNA | UBAH_PERAN | STATUS_PENGGUNA | RESET_SANDI | UBAH_SANDI | UBAH_PROFIL_PRAKTIK | LIHAT_AUDIT
+  objectType     String? // Organization | Membership | User | AuditLog | ...
+  objectId       String?
+  summary        String // deskripsi ringkas berbahasa manusia
+  detail         String? // JSON detail tambahan; TIDAK boleh memuat sandi/token/NIK
+  reason         String? // alasan bila akses tidak rutin (break-glass: fase berikut)
+  ipAddress      String?
+  userAgent      String?
+
+  createdAt DateTime @default(now())
 
   @@index([organizationId, createdAt])
   @@index([action])
 }
 
 // ============================================================
-// FASE 1 — Registrasi & Kunjungan (registration_encounter)
+// MODUL: registry — pasien (Fase 1)
+// Isi rekam medis TIDAK BOLEH dihapus; pasien hanya dinonaktifkan.
 // ============================================================
 
-// Pasien milik SATU praktik (tenant-scoped). Pasien tidak dihapus:
-// duplikat/ganda dinonaktifkan melalui isActive dan tetap tersimpan
-// demi keutuhan rekam medis.
+/// Pasien milik SATU organisasi (isolasi tenant). NIK bersifat opsional
+/// (alur pasien tanpa NIK tetap bisa terdaftar).
 model Patient {
-  id              String    @id @default(cuid())
-  organizationId  String
-  mrn             String // nomor rekam medis, unik per praktik (RM-0001 dst.)
-  fullName        String
-  nationalId      String? // NIK (16 digit) — data pribadi sensitif; ditampilkan tersamarkan
-  dateOfBirth     DateTime?
-  sex             String? // LAKI_LAKI | PEREMPUAN
-  phone           String?
-  address         String?
-  payerType       String    @default("UMUM") // UMUM | BPJS | ASURANSI | LAINNYA (label administratif, tanpa integrasi)
-  payerNumber     String? // nomor kartu BPJS/asuransi bila ada
-  notes           String? // catatan administratif pendaftaran (bukan isi klinis)
-  isActive        Boolean   @default(true)
-  createdByUserId String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                  String       @id @default(cuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  medicalRecordNumber String // nomor rekam medis internal, unik per organisasi
+  nik                 String? // 16 digit bila diketahui; unik per organisasi
+  name                String
+  dateOfBirth         DateTime?
+  sex                 String? // LAKI_LAKI | PEREMPUAN
+  phone               String?
+  address             String?
+  bloodType           String? // A | B | AB | O (+ rhesus bebas teks)
+  allergiesNote       String? // ringkasan alergi (obat/makanan/lain); WAJIB diisi eksplisit saat kunjungan
+  payerType           String? // UANG_SENDIRI | ASURANSI | LAINNYA (penanggung jawab pembayaran)
+  payerName           String?
+  ihsNumber           String? // SATUSEHAT IHS bila sudah ada (boleh kosong)
+  isSample            Boolean      @default(false)
+  status              String       @default("AKTIF") // AKTIF | NONAKTIF (tidak pernah dihapus)
+  statusNote          String?
+  encounters          Encounter[]
+  consents            ConsentRecord[]
+  portalAccess        PortalAccess[]
 
-  organization Organization  @relation(fields: [organizationId], references: [id])
-  encounters   Encounter[]
-  clinicalNotes ClinicalNote[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@unique([organizationId, mrn])
-  @@index([organizationId, fullName])
+  @@unique([organizationId, medicalRecordNumber])
+  @@index([organizationId, name])
+  @@index([organizationId, nik])
 }
 
-// Kunjungan rawat jalan (class AMB pada kosa kata SATUSEHAT — Fase 5).
-// PMK 24/2022: tanggal & jam buka-tutup kunjungan tercatat di sini.
+// ============================================================
+// MODUL: encounter — kunjungan (Fase 1)
+// Alur status: TERDAFTAR → DIPERIKSA → SELESAI → DIKUNCI →
+// TERKIRIM / GAGAL_KIRIM (via antrean SATUSEHAT). BATAL hanya sebelum
+// diperiksa, dengan alasan, dan tetap tercatat di jejak audit.
+// ============================================================
+
 model Encounter {
-  id                 String    @id @default(cuid())
-  organizationId     String
-  patientId          String
-  status             String    @default("DALAM_PROSES") // DALAM_PROSES | SELESAI
-  openedAt           DateTime  @default(now())
-  closedAt           DateTime?
-  registeredByUserId String
-  payerType          String? // snapshot pembayar saat kunjungan
-  payerNumber        String?
-  visitType          String    @default("KUNJUNGAN_LANGSUNG") // plugin: telekonsultasi Fase 7
-  closeReason        String? // alasan penutupan tanpa catatan terkunci (mis. pasien pulang sebelum diperiksa)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  patientId       String
+  patient         Patient      @relation(fields: [patientId], references: [id])
+  encounterNumber String // unik per organisasi
+  type            String       @default("DATANG_SENDIRI") // DATANG_SENDIRI | PERJANJIAN | TELEMEDISIN | KUNJUNGAN_RUMAH
+  status          String       @default("TERDAFTAR")
+  chiefComplaint  String? // keluhan utama ringkas saat pendaftaran
+  paymentMethod   String       @default("UANG_SENDIRI")
+  locationId      String?
+  scheduledAt     DateTime? // untuk perjanjian
+  telemedicineNote String? // catatan kanal telemedisin bila ada
+  registeredAt    DateTime     @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  lockedAt        DateTime?
+  lockedByLabel   String? // snapshot petugas yang mengunci
+  canceledAt      DateTime?
+  canceledReason  String?
+  documents       ClinicalDocument[]
+  diagnoses       EncounterDiagnosis[]
+  prescriptions   Prescription[]
+  procedures      EncounterProcedure[]
+  consents        ConsentRecord[]
+  invoices        Invoice[]
+  referrals       Referral[]
+  outboxEvents    OutboxEvent[]
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  patient      Patient      @relation(fields: [patientId], references: [id])
-  note         ClinicalNote?
-
-  @@index([organizationId, openedAt])
+  @@unique([organizationId, encounterNumber])
+  @@index([organizationId, status])
   @@index([patientId])
 }
 
 // ============================================================
-// FASE 2 — Catatan klinis dokter umum (clinical_note_dokter)
-// Satu catatan per kunjungan. Bagian mengikuti isi minimum
-// PMK 24/2022 (teks terstruktur; kode ICD-10/KFA menyusul Fase 3,
-// resource FHIR menyusul Fase 5 — titik sambung dijaga).
-// TIDAK ADA fungsi hapus: draf dapat diubah sampai dikunci;
-// catatan terkunci hanya dapat dikoreksi lewat amandemen
-// (versi lama dipertahankan di ClinicalNoteVersion).
-// ============================================================
-model ClinicalNote {
-  id               String    @id @default(cuid())
-  organizationId   String
-  encounterId      String    @unique
-  patientId        String
-  authorUserId     String // PPA penanggung jawab pelayanan
-  authorProfession String? // snapshot profesi penulis saat mengunci
-  authorStrNumber  String? // snapshot STR penulis saat mengunci
-  status           String    @default("DRAF") // DRAF | TERKUNCI
-
-  // — Isi minimum PMK 24/2022 —
-  subjective     String? // keluhan utama dan riwayat penyakit
-  allergiesNote  String? // alergi dan riwayat pemakaian obat yang relevan
-  objective      String? // hasil pemeriksaan fisik/tambahan
-  supportingExam String? // hasil pemeriksaan penunjang (jika ada)
-  assessment     String? // diagnosis (teks bebas; ICD-10 pada Fase 3)
-  plan           String? // rencana penatalaksanaan
-  medsGiven      String? // obat/tindakan yang diberikan (teks bebas; KFA pada Fase 3)
-  otherServices  String? // pelayanan lainnya
-  education      String? // edukasi yang diberikan kepada pasien/keluarga
-  followUpPlan   String? // rencana tindak lanjut/kontrol
-
-  versionNumber Int       @default(1)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  lockedAt      DateTime?
-  lockedByUserId String?
-
-  encounter Encounter            @relation(fields: [encounterId], references: [id])
-  patient   Patient              @relation(fields: [patientId], references: [id])
-  author    User                 @relation(fields: [authorUserId], references: [id])
-  versions  ClinicalNoteVersion[]
-  diagnoses      NoteDiagnosis[]
-  procedures     NoteProcedure[]
-  prescriptions  Prescription[]
-
-  @@index([organizationId, status])
-  @@index([authorUserId])
-}
-
-// Riwayat revisi — append-only. Setiap amandemen catatan terkunci
-// menyimpan snapshot isi (versi sebelumnya) beserta ALASAN WAJIB
-// dan pelaku. Tidak tersedia fungsi ubah/hapus di lapisan aplikasi.
-model ClinicalNoteVersion {
-  id              String   @id @default(cuid())
-  noteId          String
-  versionNumber   Int // nomor versi yang DISIMPAN (versi sebelum amandemen)
-  subjective      String?
-  allergiesNote   String?
-  objective       String?
-  supportingExam  String?
-  assessment      String?
-  plan            String?
-  medsGiven       String?
-  otherServices   String?
-  education       String?
-  followUpPlan    String?
-  status          String // status catatan saat versi ini tercatat
-  reason          String // alasan revisi — wajib diisi
-  changedByUserId String
-  changedByName   String // snapshot nama pelaku
-  createdAt       DateTime @default(now())
-
-  note ClinicalNote @relation(fields: [noteId], references: [id])
-
-  /// Snapshot kodifikasi (diagnosis ICD-10 + tindakan ICD-9-CM)
-  /// milik versi ini dalam format JSON — diisi saat amandemen
-  /// menyimpan versi sebelumnya (append-only, tidak pernah diubah).
-  codesSnapshot String?
-
-  @@unique([noteId, versionNumber])
-  @@index([noteId])
-}
-
-// ============================================================
-// FASE 3 — Terminologi: katalog referensi GLOBAL (baca-saja).
-// Bukan milik tenant: seluruh praktik memakai katalog yang sama.
-// Seed aplikasi hanya memuat SUBSET CONTOH; produksi wajib
-// mengimpor katalog resmi Kemenkes (ICD-10, ICD-9-CM, KFA).
-// Tidak ada aksi ubah/hapus katalog di lapisan aplikasi.
+// MODUL: clinical_document — catatan klinis berversi (Fase 2)
+// Tidak ada jalur hapus: setiap penyimpanan membuat versi baru.
+// Isi disimpan JSON sesuai templat profesi.
 // ============================================================
 
-model Icd10Code {
-  id          String  @id @default(cuid())
-  code        String  @unique // mis. "I10" (subset CONTOH berformat kode nyata)
-  description String // judul kode (teks pendek)
-  chapter     String? // bab ICD-10 untuk pengelompokan tampilan
-  isSeedDemo  Boolean @default(false) // penanda subset demo — bukan katalog resmi lengkap
+model ClinicalDocument {
+  id             String    @id @default(cuid())
+  organizationId String
+  encounterId    String
+  encounter      Encounter @relation(fields: [encounterId], references: [id])
+  type           String    @default("CATATAN_PEMERIKSAAN") // CATATAN_PEMERIKSAAN | ODONTOGRAM
+  profession     String? // snapshot profesi penulis (templat yang dipakai)
+  version        Int       @default(1)
+  isCurrent      Boolean   @default(true)
+  content        String // JSON bagian-bagian (sections)
+  createdByLabel String
+  updatedByLabel String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  diagnoses NoteDiagnosis[]
-}
-
-model Icd9CmCode {
-  id          String  @id @default(cuid())
-  code        String  @unique // mis. "99.21"
-  description String
-  chapter     String?
-  isSeedDemo  Boolean @default(false)
-
-  procedures NoteProcedure[]
-}
-
-model KfaCode {
-  id          String  @id @default(cuid())
-  code        String  @unique // kode KFA — subset CONTOH memakai format KFA-xxxx (sintetis)
-  name        String // nama obat/alkes (nama generik + merek pemerintah)
-  dosageForm  String? // bentuk sediaan: Tablet, Kapsul, Sirup, Sachet, Inhaler
-  strength    String? // kekuatan: "500 mg" dst.
-  unit        String? // satuan pemberian: tablet, kapsul, sachet, botol
-  isSeedDemo  Boolean @default(false)
-
-  prescriptionItems PrescriptionItem[]
-}
-
-// ============================================================
-// FASE 3 — Kodifikasi catatan (diagnosis ICD-10, tindakan ICD-9-CM)
-// Baris TIDAK dihapus setelah catatan terkunci: koreksi lewat
-// amandemen menandai baris lama dengan supersededAt dan menambah
-// baris baru (append-only). Saat draf, set kode bebas diubah
-// penulisnya — sama seperti teks draf.
-// ============================================================
-
-model NoteDiagnosis {
-  id              String    @id @default(cuid())
-  organizationId  String
-  noteId          String
-  icd10CodeId     String
-  isPrimary       Boolean   @default(false) // diagnosis utama (maks. satu disarankan)
-  noteText        String? // keterangan spesifik pasien, mis. "terkontrol kurang"
-  enteredByUserId String
-  createdAt       DateTime  @default(now())
-  lockedAt        DateTime? // terisi saat catatan dikunci (beku)
-  supersededAt    DateTime? // terisi bila baris digantikan lewat amandemen
-
-  note      ClinicalNote @relation(fields: [noteId], references: [id])
-  icd10     Icd10Code    @relation(fields: [icd10CodeId], references: [id])
-  enteredBy User         @relation("DiagnosisDientri", fields: [enteredByUserId], references: [id])
-
-  @@unique([noteId, icd10CodeId])
-  @@index([organizationId])
-}
-
-model NoteProcedure {
-  id              String    @id @default(cuid())
-  organizationId  String
-  noteId          String
-  icd9CmCodeId    String
-  noteText        String?
-  enteredByUserId String
-  createdAt       DateTime  @default(now())
-  lockedAt        DateTime?
-  supersededAt    DateTime?
-
-  note      ClinicalNote @relation(fields: [noteId], references: [id])
-  icd9Cm    Icd9CmCode   @relation(fields: [icd9CmCodeId], references: [id])
-  enteredBy User         @relation("TindakanDientri", fields: [enteredByUserId], references: [id])
-
-  @@unique([noteId, icd9CmCodeId])
+  @@unique([encounterId, type, version])
+  @@index([encounterId])
   @@index([organizationId])
 }
 
 // ============================================================
-// FASE 3 — Resep terstruktur (resep terkait catatan/kunjungan).
-// TIDAK ADA hapus: resep yang salah DIBATALKAN (status + alasan
-// wajib) dan tetap tersimpan. Isi item hanya dapat diubah selama
-// catatan masih DRAF dan oleh penulisnya; setelah kunci beku.
+// MODUL: terminology — ICD-10 / ICD-9-CM / KFA (Fase 3)
+// organizationId null = daftar bawaan platform (baca saja).
+// organizationId terisi = kode kustom milik satu organisasi.
+// ============================================================
+
+model TerminologyCode {
+  id             String        @id @default(cuid())
+  organizationId String? // null = bawaan platform
+  system         String // ICD10 | ICD9CM | KFA
+  code           String
+  display        String // istilah Indonesia
+  extra          String? // sediaan/kekuatan untuk KFA, dst.
+  isActive       Boolean       @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([system, code])
+  @@index([organizationId])
+}
+
+// ============================================================
+// MODUL: medication — resep (Fase 3). Kode obat memakai KFA (contoh di demo).
 // ============================================================
 
 model Prescription {
-  id              String    @id @default(cuid())
-  organizationId  String
-  noteId          String
-  number          String // nomor resep unik per praktik: RESEP-0001 dst.
-  status          String    @default("AKTIF") // AKTIF | DIBATALKAN
-  voidReason      String? // alasan pembatalan — wajib saat membatalkan
-  voidedAt        DateTime?
-  voidedByUserId  String?
-  createdByUserId String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id               String       @id @default(cuid())
+  organizationId   String
+  encounterId      String
+  encounter        Encounter    @relation(fields: [encounterId], references: [id])
+  prescriptionNumber String // unik per organisasi
+  status           String       @default("DIBUAT") // DIBUAT | DISELESAIKAN (diserahkan) | DIBATALKAN
+  statusNote       String? // alasan pembatalan bila ada
+  createdByLabel   String
+  dispensedByLabel String?
+  dispensedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  items            PrescriptionItem[]
 
-  note     ClinicalNote       @relation(fields: [noteId], references: [id])
-  items    PrescriptionItem[]
-  voidedBy User?              @relation("ResepDibatalkan", fields: [voidedByUserId], references: [id])
-
-  @@unique([organizationId, number])
-  @@index([organizationId])
-  @@index([noteId])
+  @@unique([organizationId, prescriptionNumber])
+  @@index([organizationId, status])
+  @@index([encounterId])
 }
 
 model PrescriptionItem {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   prescriptionId String
-  kfaCodeId      String
-  drugName       String // snapshot nama obat + kekuatan saat resep dibuat
-  dose           String? // mis. "1 tablet"
-  route          String // jalur pemberian: ORAL, TOPIKAL, INHALASI, INJEKSI, LAINNYA
-  frequency      String? // mis. "3x sehari"
-  durationDays   Int?
-  quantity       String? // mis. "No. 10"
-  instructions   String? // signa lengkap/catatan: "sesudah makan"
-  createdAt      DateTime @default(now())
-
-  prescription Prescription @relation(fields: [prescriptionId], references: [id])
-  kfaCode      KfaCode      @relation(fields: [kfaCodeId], references: [id])
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  kfaCode        String? // kode KFA bila ada (contoh pada demo)
+  drugName       String
+  strength       String? // kekuatan, mis. 500 mg
+  form           String? // sediaan, mis. tablet / kapsul / sirup
+  quantity       String // jumlah + satuan
+  usage          String // aturan pakai (signature)
+  note           String?
 
   @@index([prescriptionId])
+}
+
+// ============================================================
+// MODUL: procedure — tindakan (Fase 3). Kode opsional ICD-9-CM.
+// ============================================================
+
+model EncounterDiagnosis {
+  id             String    @id @default(cuid())
+  organizationId String
+  encounterId    String
+  encounter      Encounter @relation(fields: [encounterId], references: [id])
+  icd10Code      String // kode ICD-10 (wajib; mapper FHIR menolak kosong)
+  display        String // snapshot istilah
+  kind           String    @default("SEKUNDER") // UTAMA | SEKUNDER
+  note           String?
+  createdByLabel String
+  createdAt      DateTime  @default(now())
+
+  @@index([encounterId])
+  @@index([organizationId])
+}
+
+
+model EncounterProcedure {
+  id             String       @id @default(cuid())
+  organizationId String
+  encounterId    String
+  encounter      Encounter    @relation(fields: [encounterId], references: [id])
+  icd9cmCode     String?
+  name           String
+  note           String?
+  performedAt    DateTime     @default(now())
+  performerLabel String
+  consentId      String? // tautan ke catatan persetujuan bila ada
+  createdAt      DateTime     @default(now())
+
+  @@index([encounterId])
+  @@index([organizationId])
+}
+
+// ============================================================
+// MODUL: consent — persetujuan (Fase 6)
+// Menyimpan versi teks yang disetujui; tidak dapat dihapus.
+// ============================================================
+
+model ConsentRecord {
+  id             String       @id @default(cuid())
+  organizationId String
+  patientId      String
+  patient        Patient      @relation(fields: [patientId], references: [id])
+  encounterId    String?
+  encounter      Encounter?   @relation(fields: [encounterId], references: [id])
+  type           String // PERSETUJUAN_UMUM | TINDAKAN | TELEMEDISIN | PENGAJUAN_DATA
+  agreedText     String // snapshot teks persetujuan yang disetujui
+  agreedByName   String // nama pemberi persetujuan (pasien/keluarga)
+  agreedByRole   String? // PASIEN | KELUARGA | WALI
+  method         String       @default("ELEKTRONIK") // TULISAN | ELEKTRONIK
+  witnessName    String?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([encounterId])
+}
+
+// ============================================================
+// MODUL: billing_claim — tagihan ringan (Fase 8). Tanpa integrasi BPJS.
+// ============================================================
+
+model Invoice {
+  id              String       @id @default(cuid())
+  organizationId  String
+  encounterId     String
+  encounter       Encounter    @relation(fields: [encounterId], references: [id])
+  invoiceNumber   String // unik per organisasi
+  status          String       @default("DRAFT") // DRAFT | TERBIT | DIBAYAR | DIBATALKAN
+  items           String // JSON [{deskripsi, qty, harga}]
+  total           Int // rupiah, bulat
+  payerType       String       @default("UANG_SENDIRI")
+  payerName       String?
+  paymentMethod   String? // TUNAI | TRANSFER | QRIS | E-WALLET | ASURANSI
+  paidAt          DateTime?
+  canceledReason  String?
+  createdByLabel  String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status])
+  @@index([encounterId])
+}
+
+// ============================================================
+// MODUL: integration_satusehat — adapter outbox (Fase 5)
+// RME TIDAK memanggil API langsung dari alur klinis. Kunjungan terkunci
+// memasukkan kejadian ke antrean (outbox); pekerja terpisah memetakan
+// ke FHIR R4 dan mengirim. Mode SIMULASI tidak menghubungi server mana pun.
+// ============================================================
+
+model SatusehatConfig {
+  id              String       @id @default(cuid())
+  organizationId  String       @unique
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  mode            String       @default("SIMULASI") // SIMULASI | SANDBOX
+  baseUrl         String? // sandbox URL, mis. https://api-satusehat.stikes-whatever.go.id
+  clientId        String?
+  clientSecret    String? // DEMO: disimpan apa adanya; produksi WAJIB secret manager
+  locationRefId   String? // Location SATUSEHAT bila sudah diterbitkan sandbox
+  enabled         Boolean      @default(false)
+  lastProcessedAt DateTime?
+  updatedAt       DateTime     @updatedAt
+
+  createdAt DateTime @default(now())
+}
+
+model OutboxEvent {
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  encounterId      String
+  encounter        Encounter    @relation(fields: [encounterId], references: [id])
+  eventType        String // PATIENT | ENCOUNTER | CONDITION | OBSERVATION | PROCEDURE | MEDICATIONREQUEST | COMPOSITION
+  aggregateRef     String // referensi internal (id baris sumber / kunci)
+  payload          String // JSON FHIR R4 yang dipetakan saat masuk antrean
+  status           String       @default("ANTRE") // ANTRE | TERKIRIM | GAGAL_VALIDASI | GAGAL_KIRIM
+  attempts         Int          @default(0)
+  lastError        String?
+  fhirResourceType String?
+  fhirResourceId   String? // ID sumber daya yang dikembalikan (anti duplikat)
+  sentAt           DateTime?
+  syncLogs         FhirSyncLog[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([organizationId, status])
+  @@index([encounterId])
+}
+
+model FhirSyncLog {
+  id            String      @id @default(cuid())
+  organizationId String
+  outboxEventId String
+  outboxEvent   OutboxEvent @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+  attempt       Int
+  outcome       String // BERHASIL | GAGAL_VALIDASI | GAGAL_KIRIM | SIMULASI
+  message       String?
+  createdAt     DateTime    @default(now())
+
+  @@index([outboxEventId])
+}
+
+// ============================================================
+// MODUL: patient_portal — akses pasien (Fase 6)
+// Masuk portal: kode akses 6 digit + tanggal lahir. Basis data menyimpan
+// HASH kode; kode hanya ditampilkan sekali saat dibuat.
+// ============================================================
+
+model PortalAccess {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  patientId      String
+  patient        Patient      @relation(fields: [patientId], references: [id])
+  codeHash       String @unique // SHA-256 dari kode 6 digit
+  isActive       Boolean      @default(true)
+  lastUsedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([patientId])
+}
+
+// ============================================================
+// MODUL: referral — rujukan keluar (Fase 8)
+// ============================================================
+
+model Referral {
+  id             String       @id @default(cuid())
+  organizationId String
+  encounterId    String
+  encounter      Encounter    @relation(fields: [encounterId], references: [id])
+  letterNumber   String // unik per organisasi
+  destination    String // fasilitas kesehatan tujuan
+  reason         String
+  notes          String?
+  createdByLabel String
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, letterNumber])
+  @@index([encounterId])
+}
+
+// ============================================================
+// MODUL: peta modul & changelog regulasi (pendukung tata kelola)
+// ============================================================
+
+/// Referensi regulasi yang dijadikan acuan produk. Hanya mencatat sumber
+/// resmi dan status pelacakan; TIDAK berisi klaim sertifikasi/kepatuhan.
+model RegulationRef {
+  id             String    @id @default(cuid())
+  code           String    @unique // PMK-24-2022 | UU-17-2023 | UU-27-2022 | PP-71-2019 | SATUSEHAT-PLAYBOOK
+  title          String
+  status         String    @default("BERLAKU") // BERLAKU | DINAMIKA | DICABUT
+  note           String?
+  lastReviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Changelog rilis: fitur, dampak regulasi, migrasi, dan yang sengaja ditunda.
+model ReleaseLog {
+  id               String   @id @default(cuid())
+  phase            String // "Fase 0 — Fondasi"
+  version          String // "0.1.0"
+  releasedAt       DateTime @default(now())
+  features         String // JSON array of string
+  regulatoryImpact String?
+  migrationNote    String?
+  deferred         String // JSON array of string
 }

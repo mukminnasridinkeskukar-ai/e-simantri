@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -50,9 +51,15 @@ test
 prompt
 
 server.log
+
+# basis data lokal — JANGAN PERNAH commit basis data berisi data pasien
+/db/*.db
+/db/*.sqlite
+
+# artefak internal sandbox
+/worklog.md
+/download/
+/scripts/zip-stage/
+
 # Skills directory
 /skills/
-# e-SIMANTRI — artefak lokal yang tidak ikut repositori
-/.pgsql/
-/db/
-/tool-results/

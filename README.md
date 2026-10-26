@@ -1,100 +1,66 @@
 # e-SIMANTRI — Sistem Informasi Manajemen Praktik Mandiri Terintegrasi
 
-Aplikasi rekam medis elektronik (RME) untuk **praktik mandiri** di Indonesia
-(dokter, dokter gigi, bidan, perawat, apoteker, ahli gizi, fisioterapis).
-Bukan SIMRS rumah sakit.
+RME (rekam medis elektronik) untuk **praktik mandiri** — dokter, dokter gigi, perawat,
+bidan, apoteker, gizi, fisioterapi, psikologi — bukan SIMRS rumah sakit.
 
-**Status: Fase 0–3 — Fondasi, Registrasi & Kunjungan, Catatan Klinis, Terminologi & Resep Terstruktur** (boleh dicoba; Fase 4 belum dibangun).
+- Antarmuka **Bahasa Indonesia**, nada tenang-jelas-klinis.
+- **Multi-tenant**: satu platform, banyak praktik; data terisolasi per praktik.
+- **Multi-peran**: 8 peran bawaan; satu akun boleh tergabung di banyak praktik dengan peran berbeda.
+- **Kepatuhan dengan jujur**: mengikuti PMK 24/2022 (RME), UU 17/2023, UU 27/2022 (PDP),
+  PP 71/2019 (PSE), pedoman interoperabilitas SATUSEHAT (FHIR R4). Tanpa klaim sertifikasi.
 
-## Yang sudah bisa dipakai (Fase 0–3)
+## Status: Fase 0–8 diluncurkan (lingkungan contoh)
 
-- Kerangka aplikasi multi-tenant: satu organisasi = satu tempat praktik
-  (satu badan hukum / satu SIP penyelenggara).
-- Autentikasi: kata sandi ter-hash (bcrypt), sesi kedaluwarsa otomatis
-  (absolut 12 jam, idle 60 menit), verifikasi dua langkah (TOTP) untuk semua
-  peran, pencabutan sesi perangkat lain.
-- 8 peran bawaan dengan hak yang hanya dapat **dipersempit** per praktik:
-  Penanggung Jawab, PPA, PPA Pendamping, Pendaftaran, Rekam Medis,
-  Kasir/Klaim, Pasien, Admin Teknis.
-- Profil tempat praktik (diubah Penanggung Jawab/Admin Teknis, diaudit).
-- Manajemen pengguna & penugasan peran dengan penjaga kewenangan (peran
-  klinis menuntut profesi + STR/SIP; hanya PJ boleh menetapkan peran klinis).
-- Jejak audit **append-only**: siapa, peran, kapan, aksi, objek, perangkat,
-  IP, dan alasan bila akses tidak rutin.
-- **Fase 1 — Registrasi & Kunjungan:** pasien per praktik dengan nomor
-  rekam medis otomatis (pasien tidak dapat dihapus), NIK tersamarkan pada
-  daftar, buka/tutup kunjungan dengan tanggal-jam otomatis.
-- **Fase 2 — Catatan klinis dokter umum:** formulir isi minimum PMK
-  24/2022, kunci catatan dengan validasi kelengkapan di sisi server,
-  kunjungan ikut ditutup saat catatan dikunci, koreksi terkunci hanya lewat
-  amandemen beralasan (versi lama dipertahankan dan dapat dibuka), dasbor
-  kelengkapan untuk Rekam Medis/Penanggung Jawab, dan audit otomatis atas
-  setiap pembukaan catatan oleh pihak bukan penulis.
-- **Fase 3 — Terminologi & resep terstruktur:** kodifikasi diagnosis
-  (ICD-10) dan tindakan (ICD-9-CM) dari katalog referensi global
-  (baca-saja); kode beku saat catatan dikunci, koreksi hanya lewat
-  amandemen beralasan — baris lama ditandai `supersededAt` dan snapshot
-  kode tersimpan pada versi (append-only, tanpa hapus); resep terstruktur
-  bernomor per praktik dengan obat KFA, jalur pemberian, dosis/frekuensi/
-  lama/jumlah/keterangan signa; resep salah **dibatalkan beralasan**, tidak
-  pernah dihapus; peramban Terminologi untuk menelusuri ketiga katalog;
-  daftar kerja catatan kini punya tab "Catatan saya" untuk menjangkau
-  catatan terkunci milik sendiri.
+| Fase | Modul | Status |
+| ---- | ----- | ------ |
+| 0 | Fondasi: tenant, masuk akun, peran, audit, profil praktik | ✅ |
+| 1 | Registrasi pasien (anti-duplikat, nomor RM otomatis) & kunjungan (4 jenis, alur status) | ✅ |
+| 2 | Catatan klinis berversi per profesi, kunci kunjungan + cek field wajib, tanpa hapus | ✅ |
+| 3 | Diagnosa ICD-10 (wajib berkode), tindakan ICD-9-CM, resep KFA, terminologi kustom | ✅ |
+| 4 | Resume otomatis + salinan cetak (resume, resep, rujukan) dengan jejak cetak | ✅ |
+| 5 | Adapter SATUSEHAT pola outbox + mapper FHIR R4 + pekerja SIMULASI/SANDBOX | ✅ |
+| 6 | Portal pasien (kode 6 digit + tanggal lahir) & persetujuan (snapshot teks) | ✅ |
+| 7 | Mutu kelengkapan, retensi 25 tahun, odontogram 32 gigi, templat per profesi | ✅ |
+| 8 | Tagihan ringan + ekspor CSV, surat rujukan bernomor otomatis | ✅ |
 
-## Yang sengaja ditunda (agar tidak melompat)
-
-- Resume/salinan (Fase 4), adapter SATUSEHAT (Fase 5, sandbox saja),
-  portal pasien (Fase 6), templat profesi lain & odontogram (Fase 7),
-  klaim/rujukan (Fase 8).
-
-> **Katalog terminologi:** seed CONTOH hanya memuat **subset** ICD-10,
-> ICD-9-CM, dan KFA (kode KFA demo memakai format sintetis `KFA-xxxx`).
-> Instalasi produksi **wajib** mengimpor katalog resmi Kemenkes sebelum
-> pengkodean nyata — lihat DEPLOYMENT.md.
-
-## Teknologi
-
-| Lapisan | Teknologi |
-|---|---|
-| Frontend + logika server | Next.js 16 (App Router, Server Actions), TypeScript, Tailwind CSS 4, shadcn/ui |
-| Database | PostgreSQL — **Neon** (serverless) via **Prisma** |
-| Hosting | **Vercel** (deploy otomatis dari GitHub) |
-
-Skema database (`prisma/schema.prisma`) memakai provider `postgresql` dengan
-pemisahan `DATABASE_URL` (pooled, untuk runtime) dan `DIRECT_URL` (direct,
-untuk migrasi) — sesuai anjuran arsitektur Neon.
-
-## Mulai cepat (lokal)
+## Menjalankan (demo)
 
 ```bash
 bun install
-cp .env.example .env       # isi DATABASE_URL + DIRECT_URL (Neon atau Postgres lokal)
-bun run db:deploy          # terapkan migrasi skema
-bun run db:seed            # DATA CONTOH fiktif — hanya untuk demo/latihan!
-bun run dev                # http://localhost:3000
+bun run db:push
+bun prisma/seed.ts            # akun & praktik contoh
+bun prisma/seed-fase-1-8.ts   # data klinis contoh + terminologi
+bun run dev                   # http://localhost:3000
 ```
 
-Akun contoh (hanya dari seed CONTOH, kata sandi semua akun `Contoh123!`):
-`andi@praktik-contoh.id` (Penanggung Jawab + PPA, lintas praktik —
-penulis catatan contoh), `sari@praktik-contoh.id` (PPA Pendamping),
-`rina@praktik-contoh.id` (Pendaftaran), `tono@praktik-contoh.id`
-(Rekam Medis), `budi@praktik-contoh.id` (Kasir), `admin@praktik-contoh.id`
-(Admin Teknis), `dewi@praktik-contoh.id` (PJ praktik bidan).
+Akun contoh (sandi semua: `Contoh#2026`):
 
-Uji verifikasi otomatis: `bun tests/verify-phase0.ts`,
-`bun tests/verify-fase12.ts`, dan `bun tests/verify-fase3.ts`
-(database harus berisi seed CONTOH).
+| Surel | Peran |
+| ----- | ----- |
+| andi@contoh.id | Penanggung Jawab + PPA |
+| budi@contoh.id | PPA (dokter gigi) |
+| ayu@contoh.id | PPA Pendamping |
+| ani@contoh.id | Pendaftaran |
+| rani@contoh.id | Rekam Medis |
+| sari@contoh.id | Kasir |
+| tono@contoh.id | Admin Teknis |
+| siti@contoh.id | Pasien (via portal) |
 
-## Deploy produksi
+Portal pasien: `/portal` — kode demo `482913` + tanggal lahir `10/01/1988`.
 
-Panduan lengkap langkah demi langkah — **Neon → GitHub → Vercel** beserta
-bootstrap akun produksi, verifikasi pasca-deploy, kepatuhan retensi, dan
-troubleshooting: lihat **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+## Jaminan kepatuhan yang ditegaskan kode
 
-## Disiplin pengembangan
+1. **Tidak ada jalur hapus** untuk isi rekam medis: koreksi = versi baru; status batal
+   hanya dengan alasan dan tetap teraudit.
+2. **Kunci kunjungan** menolak bila field wajib rawat jalan belum lengkap; membuka kunci
+   hanya Penanggung Jawab + alasan + audit.
+3. **Isolasi tenant**: semua kueri terlingkup `organizationId` dari sesi server.
+4. **Audit append-only**: tidak ada fungsi ubah/hapus di lapisan aplikasi.
+5. **SATUSEHAT**: inti RME tidak memanggil API dari layar; hanya lewat outbox + worker;
+   kondisi tanpa kode ditolak mapper; mode SIMULASI tidak mengirim apa pun.
+6. **Portal pasien**: kode akses disimpan sebagai hash; hanya kunjungan terkunci yang tampil.
 
-- Pengembangan per fase; fase berikutnya hanya dimulai setelah fase aktif
-  benar-benar bisa dicoba.
-- Larangan keras: menghapus isi klinis, berbagi akun, satu "admin" yang
-  melihat semua praktik, integrasi SATUSEHAT produksi sebelum fase-nya.
-- Seluruh data contoh diberi penanda **CONTOH** dan dinyatakan fiktif.
+## Deploy
+
+Lihat [DEPLOY.md](./DEPLOY.md) — GitHub → Vercel → Supabase (PostgreSQL), termasuk
+variabel lingkungan, migrasi skema, cron pekerja antrean, dan checklist keamanan produksi.

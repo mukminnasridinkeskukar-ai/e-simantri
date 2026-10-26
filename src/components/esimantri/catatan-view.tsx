@@ -77,6 +77,7 @@ import {
   type DxEditRow,
   type PrEditRow,
 } from './catatan-kodifikasi'
+import { DokumenCard } from './catatan-dokumen'
 
 function fmtDT(iso: string | null): string {
   if (!iso) return '—'
@@ -458,6 +459,8 @@ function NoteEditor({
             onReloadNote={onReloadNote}
             onSaved={onSaved}
           />
+          {/* Fase 4 — terbitkan ringkasan/salinan untuk pasien dari catatan terkunci */}
+          <DokumenCard state={state} encounterId={encounter.id} isAuthor={!!note?.isAuthor} />
         </>
       ) : (
         <>

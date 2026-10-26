@@ -67,10 +67,10 @@ export const ROLE_DESCRIPTIONS: Record<RoleKey, string> = {
 }
 
 // ------------------------------------------------------------
-// Kunci izin Fase 0-3. Kunci Fase 0 (administratif), Fase 1-2
-// (pasien, kunjungan, catatan klinis, kelengkapan), dan Fase 3
-// (terminologi, kodifikasi). Kunci Fase 4+ (ringkasan, salinan,
-// SATUSEHAT, klaim) akan ditambahkan pada fase-nya.
+// Kunci izin Fase 0-4. Kunci Fase 0 (administratif), Fase 1-2
+// (pasien, kunjungan, catatan klinis, kelengkapan), Fase 3
+// (terminologi, kodifikasi), dan Fase 4 (ringkasan & salinan).
+// Kunci Fase 5+ (SATUSEHAT, klaim) akan ditambahkan pada fase-nya.
 // ------------------------------------------------------------
 export const PERMISSION_KEYS = [
   // Fase 0 — administratif
@@ -97,20 +97,25 @@ export const PERMISSION_KEYS = [
   // Fase 3 — terminologi & kodifikasi
   'terminologi.cari',   // mencari katalog ICD-10/ICD-9-CM/KFA (referensi global)
   'kodifikasi.kelola',  // mengatur kode & resep pada draf catatan milik sendiri
+  // Fase 4 — ringkasan pelayanan & salinan catatan untuk pasien
+  'dokumen.lihat',      // melihat daftar dokumen terbit + membuka/dicetak (diaudit)
+  'dokumen.terbitkan',  // menerbitkan ringkasan/salinan dari catatan TERKUNCI
 ] as const
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number]
 
 const ALL_ROLES: readonly RoleKey[] = ROLE_KEYS
 
-// Matriks izin Fase 0-3.
+// Matriks izin Fase 0-4.
 // Prinsip kunci (master prompt):
 // - Penanggung Jawab TIDAK otomatis membaca isi klinis pengguna
 //   lain; ia melihat metadata kunjungan dan dasbor kelengkapan.
 //   Kode diagnosis/resep adalah ISI KLINIS — PJ tidak mencarinya
-//   dan tidak mengelolanya.
+//   dan tidak mengelolanya. Dokumen ringkasan/salinan juga memuat
+//   isi klinis — PJ tidak menerbitkan dan tidak membukanya.
 // - Pendaftaran tidak melihat isi catatan klinis sama sekali.
 // - Membuka isi catatan oleh pihak bukan penulis selalu diaudit.
+// - Menerbitkan/membuka dokumen salinan juga selalu diaudit.
 export const ROLE_PERMISSIONS: Record<RoleKey, readonly PermissionKey[]> = {
   PENANGGUNG_JAWAB: [
     'beranda.lihat',
@@ -140,6 +145,9 @@ export const ROLE_PERMISSIONS: Record<RoleKey, readonly PermissionKey[]> = {
     'catatan.klinis.revisi',
     'terminologi.cari',
     'kodifikasi.kelola',
+    // Fase 4: PPA menerbitkan ringkasan/salinan dari catatan miliknya
+    'dokumen.lihat',
+    'dokumen.terbitkan',
   ],
   PPA_PENDAMPING: [
     'beranda.lihat',
@@ -150,6 +158,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, readonly PermissionKey[]> = {
     'kunjungan.lihat',
     'catatan.klinis.lihat', // buka isi selalu diaudit; templat asuhan pendamping menyusul Fase 7
     'terminologi.cari', // referensi katalog boleh dibaca; mengelola kode tetap milik PPA penulis
+    'dokumen.lihat', // Fase 4: dapat melihat dokumen terbit (baca-saja, diaudit)
   ],
   PENDAFTARAN: [
     'beranda.lihat',
@@ -172,6 +181,9 @@ export const ROLE_PERMISSIONS: Record<RoleKey, readonly PermissionKey[]> = {
     'catatan.klinis.lihat', // untuk tugas kelengkapan/koding — seluruhnya diaudit
     'kelengkapan.dasbor.lihat',
     'terminologi.cari', // bantuan koding: mencari kode ICD-10/ICD-9-CM
+    // Fase 4: Rekam Medis mengurus permintaan salinan RM — seluruhnya diaudit
+    'dokumen.lihat',
+    'dokumen.terbitkan',
   ],
   KASIR: [
     'beranda.lihat',
@@ -266,6 +278,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   RESEP_DIBUAT: 'Resep terbit',
   RESEP_DISEMPAN: 'Resep disimpan',
   RESEP_DIBATALKAN: 'Resep dibatalkan',
+  // Fase 4
+  DOKUMEN_DITERBITKAN: 'Ringkasan/salinan diterbitkan',
+  DOKUMEN_DILIHAT: 'Dokumen ringkasan/salinan dibuka/dicetak',
 }
 
 export function auditActionLabel(action: string): string {

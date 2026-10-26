@@ -323,3 +323,98 @@ export interface PrescriptionItemInputDTO {
   quantity?: string | null
   instructions?: string | null
 }
+
+// ============================================================
+// Fase 4 — Ringkasan pelayanan & salinan catatan (dokumen pasien)
+// ============================================================
+
+export type SummaryDocKind = 'RINGKASAN_PELAYANAN' | 'SALINAN_CATATAN'
+
+// Baris daftar dokumen (metadata — isi hanya dibuka lewat halaman cetak)
+export interface SummaryDocRowDTO {
+  id: string
+  encounterId: string
+  kind: SummaryDocKind
+  number: string
+  patientName: string
+  mrn: string
+  purpose: string
+  recipientRelation: string
+  recipientName: string | null
+  issuedByName: string
+  issuedAt: string
+  isIssuer: boolean
+}
+
+// Input penerbitan dokumen dari catatan terkunci
+export interface SummaryDocIssueInputDTO {
+  kind: SummaryDocKind
+  purpose: string
+  recipientRelation?: string
+  recipientName?: string | null
+}
+
+export interface SummaryDocIssueResult extends ActionResult {
+  documentId?: string
+  number?: string
+}
+
+// Isi snapshot dokumen — dipakai halaman cetak /cetak/[documentId]
+export interface SummaryDocContentDTO {
+  openedAt: string | null
+  closedAt: string | null
+  encounterStatus: string | null
+  note: NoteContentDTO
+  noteStatus: string
+  noteVersion: number
+  diagnoses: { code: string; description: string; isPrimary: boolean; noteText: string | null }[]
+  procedures: { code: string; description: string; noteText: string | null }[]
+  prescriptions: {
+    number: string
+    status: string
+    items: {
+      drugName: string
+      dose: string | null
+      route: string
+      frequency: string | null
+      durationDays: number | null
+      quantity: string | null
+      instructions: string | null
+    }[]
+  }[]
+  authorName: string
+  authorProfession: string | null
+  authorStrNumber: string | null
+}
+
+export interface SummaryDocPatientDTO {
+  fullName: string
+  mrn: string
+  nationalIdMasked: string | null
+  dateOfBirth: string | null
+  sex: string | null
+}
+
+export interface SummaryDocDetailDTO {
+  id: string
+  kind: SummaryDocKind
+  number: string
+  purpose: string
+  recipientRelation: string
+  recipientName: string | null
+  issuedByName: string
+  issuedAt: string
+  patient: SummaryDocPatientDTO
+  content: SummaryDocContentDTO
+  org: {
+    name: string
+    letterheadText: string | null
+    address: string | null
+    city: string | null
+    province: string | null
+    phone: string | null
+    email: string | null
+    sipNumber: string | null
+  }
+  isIssuer: boolean
+}

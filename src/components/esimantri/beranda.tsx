@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   CircleDashed,
   FileText,
+  Printer,
   Stethoscope,
   ShieldCheck,
   UserRound,
@@ -27,7 +28,7 @@ const PHASES: { n: number; title: string; desc: string; aktif: boolean }[] = [
   { n: 1, title: 'Registrasi & kunjungan', desc: 'Pasien, antrean hari ini, buka kunjungan, status kunjungan', aktif: true },
   { n: 2, title: 'Catatan klinis dokter umum', desc: 'Formulir wajib PMK, versi, kunci catatan, larangan hapus, dasbor kelengkapan', aktif: true },
   { n: 3, title: 'Terminologi & resep terstruktur', desc: 'Kodifikasi ICD-10/ICD-9-CM pada catatan, katalog KFA, resep terstruktur tanpa hapus', aktif: true },
-  { n: 4, title: 'Resume & salinan pasien', desc: 'Ringkasan terstruktur, unduh salinan, jejak pencetakan', aktif: false },
+  { n: 4, title: 'Resume & salinan pasien', desc: 'Ringkasan terstruktur, unduh salinan, jejak pencetakan', aktif: true },
   { n: 5, title: 'Adapter SATUSEHAT', desc: 'Mapper FHIR, outbox, antrean sandbox, kredensial per praktik', aktif: false },
   { n: 6, title: 'Portal pasien & consent', desc: 'Akun pasien terbatas, persetujuan, riwayat akses', aktif: false },
   { n: 7, title: 'Mutu, retensi, telemedisin, templat profesi lain', desc: 'Odontogram, templat bidan/perawat/gizi/fisioterapi, retensi 25 tahun', aktif: false },
@@ -86,6 +87,12 @@ export function BerandaView({
           desc="Kodifikasi ICD-10/ICD-9-CM pada catatan, katalog KFA, resep terstruktur; koreksi kode lewat amandemen beralasan (Fase 3)."
           ok
         />
+        <StatusCard
+          icon={<Printer className="h-4 w-4" />}
+          title="Ringkasan & Salinan"
+          desc="Terbitkan ringkasan pelayanan/salinan catatan untuk pasien dari catatan terkunci, berkop, snapshot append-only, jejak audit (Fase 4)."
+          ok
+        />
       </section>
 
       {/* Peta fase */}
@@ -96,8 +103,8 @@ export function BerandaView({
             Peta pengembangan
           </CardTitle>
           <CardDescription>
-            Satu fase setiap giliran. Fase 0–3 sudah bisa dicoba; Fase 4 hanya dibangun setelah
-            Fase 3 teruji di lapangan.
+            Satu fase setiap giliran. Fase 0–4 sudah bisa dicoba; Fase 5 hanya dibangun setelah
+            Fase 4 teruji di lapangan.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -144,7 +151,7 @@ export function BerandaView({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <FileText className="h-4 w-4 text-primary" />
-              Catatan rilis — Fase 1–3
+              Catatan rilis — Fase 1–4
             </CardTitle>
             <CardDescription>Yang sudah bisa dipakai, di atas fondasi Fase 0.</CardDescription>
           </CardHeader>
@@ -159,6 +166,9 @@ export function BerandaView({
               <li>Fase 3: kodifikasi diagnosis ICD-10 dan tindakan ICD-9-CM dari katalog referensi; kode beku saat catatan dikunci.</li>
               <li>Fase 3: resep terstruktur bernomor per praktik dengan obat KFA dan aturan pakai; resep salah dibatalkan beralasan, tidak dihapus.</li>
               <li>Fase 3: koreksi kode pada catatan terkunci lewat amandemen — baris lama ditandai, versi beserta snapshot kode tersimpan.</li>
+              <li>Fase 4: terbitkan ringkasan pelayanan atau salinan lengkap catatan terkunci untuk pasien, bernomor per praktik (RINGKASAN-xxxx / SALINAN-xxxx).</li>
+              <li>Fase 4: dokumen berkop surat praktik, siap cetak A4/PDF; isi snapshot saat penerbitan — amandemen setelahnya tidak mengubah dokumen terbit.</li>
+              <li>Fase 4: penerima & keperluan pemberian tercatat; pembukaan dokumen oleh pihak selain penerbit tercatat di jejak audit.</li>
               <li>Dasbor kelengkapan untuk Rekam Medis & Penanggung Jawab (metadata, tanpa isi klinis).</li>
               <li>Akses isi catatan oleh pihak bukan penulis selalu tercatat pada jejak audit.</li>
             </ul>
@@ -174,7 +184,6 @@ export function BerandaView({
           </CardHeader>
           <CardContent className="space-y-3">
             <ul className="list-disc space-y-1.5 pl-5 text-sm">
-              <li>Resume kunjungan terstruktur, salinan untuk pasien, jejak pencetakan (Fase 4).</li>
               <li>Adapter SATUSEHAT — kredensial belum dikonfigurasi sama sekali (Fase 5, sandbox saja).</li>
               <li>Portal pasien, consent, riwayat akses pasien (Fase 6).</li>
               <li>Templat klinis profesi lain (bidan, perawat, gizi, fisioterapi), odontogram dokter gigi, asuhan PPA pendamping — titik sambung sudah disiapkan (Fase 7).</li>

@@ -24,3 +24,28 @@ export const SEX_OPTIONS: { value: string; label: string }[] = [
 export function sexLabel(value: string | null | undefined): string {
   return SEX_OPTIONS.find((p) => p.value === value)?.label ?? value ?? '—'
 }
+
+// ============================================================
+// Fase 4 — Label dokumen ringkasan/salinan (lib, bukan 'use server',
+// agar dapat dipakai klien & server).
+// ============================================================
+
+export const DOC_KIND_OPTIONS: { value: string; label: string }[] = [
+  { value: 'RINGKASAN_PELAYANAN', label: 'Ringkasan pelayanan' },
+  { value: 'SALINAN_CATATAN', label: 'Salinan catatan klinis' },
+]
+
+export function describeKind(kind: string | null | undefined): string {
+  return DOC_KIND_OPTIONS.find((p) => p.value === kind)?.label ?? kind ?? '—'
+}
+
+export const DOC_RELATION_OPTIONS: { value: string; label: string }[] = [
+  { value: 'PASIEN', label: 'Pasien sendiri' },
+  { value: 'KELUARGA', label: 'Keluarga' },
+  { value: 'KUASA_HUKUM', label: 'Kuasa hukum' },
+  { value: 'LAINNYA', label: 'Lainnya' },
+]
+
+export function docRelationLabel(value: string | null | undefined): string {
+  return DOC_RELATION_OPTIONS.find((p) => p.value === value)?.label ?? value ?? '—'
+}

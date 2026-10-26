@@ -16,14 +16,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "e-SIMANTRI — Sistem Informasi Manajemen Praktik Mandiri Terintegrasi",
   description:
-    "Rekam Medis Elektronik (RME) untuk tempat praktik mandiri tenaga medis dan tenaga kesehatan. Fase 0 — Fondasi.",
-  keywords: ["e-SIMANTRI", "RME", "rekam medis elektronik", "praktik mandiri"],
+    "Rekam medis elektronik untuk tempat praktik mandiri tenaga medis dan tenaga kesehatan. Fase 0 — Fondasi: tenant, masuk akun, peran, jejak audit, profil praktik.",
+  applicationName: "e-SIMANTRI",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 5,
 };
 
 export default function RootLayout({
@@ -34,7 +33,7 @@ export default function RootLayout({
   return (
     <html lang="id" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         {children}
         <Toaster />
